@@ -1,0 +1,12 @@
+.{
+    .name = .enever,
+    .version = "0.2.0",
+    .fingerprint = 0x35fc6a47ad69075f,
+    .minimum_zig_version = "0.15.0",
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "src",
+        "tests",
+    },
+}
