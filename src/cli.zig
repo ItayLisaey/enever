@@ -1,9 +1,31 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const env_parser = @import("env-parser.zig");
 const masking = @import("masking.zig");
 const output = @import("output.zig");
 
 pub const version = "0.2.0";
+
+// Zig version compatibility helpers for stdout/stderr
+fn getStdOut() std.fs.File {
+    if (comptime builtin.zig_version.order(.{ .major = 0, .minor = 14, .patch = 0 }) == .gt) {
+        // Zig 0.15+
+        return std.fs.File.stdout();
+    } else {
+        // Zig 0.14.x and earlier
+        return std.io.getStdOut();
+    }
+}
+
+fn getStdErr() std.fs.File {
+    if (comptime builtin.zig_version.order(.{ .major = 0, .minor = 14, .patch = 0 }) == .gt) {
+        // Zig 0.15+
+        return std.fs.File.stderr();
+    } else {
+        // Zig 0.14.x and earlier
+        return std.io.getStdErr();
+    }
+}
 
 pub const ExitCode = struct {
     pub const success: u8 = 0;
@@ -43,13 +65,13 @@ pub const Options = struct {
 fn printErr(comptime fmt: []const u8, args: anytype) void {
     var buf: [1024]u8 = undefined;
     const msg = std.fmt.bufPrint(&buf, fmt, args) catch return;
-    std.io.getStdErr().writeAll(msg) catch {};
+    getStdErr().writeAll(msg) catch {};
 }
 
 fn printOut(comptime fmt: []const u8, args: anytype) void {
     var buf: [4096]u8 = undefined;
     const msg = std.fmt.bufPrint(&buf, fmt, args) catch return;
-    std.io.getStdOut().writeAll(msg) catch {};
+    getStdOut().writeAll(msg) catch {};
 }
 
 fn printQuiet(opts: *const Options, comptime fmt: []const u8, args: anytype) void {
@@ -71,18 +93,21 @@ pub fn parseArgsFromSlice(allocator: std.mem.Allocator, test_args: ?[]const []co
     var arg_list = std.ArrayListUnmanaged([]const u8){};
     defer arg_list.deinit(allocator);
 
+    // Track if we own the strings (need to free on Windows)
+    var process_args: ?std.process.ArgIterator = null;
+    defer if (process_args) |*pa| pa.deinit();
+
     if (test_args) |args| {
         // Use provided test arguments
         try arg_list.appendSlice(allocator, args);
     } else {
         // Use process arguments
-        var args = try std.process.argsWithAllocator(allocator);
-        defer args.deinit();
+        process_args = try std.process.argsWithAllocator(allocator);
 
         // Skip program name
-        _ = args.next();
+        _ = process_args.?.next();
 
-        while (args.next()) |arg| {
+        while (process_args.?.next()) |arg| {
             try arg_list.append(allocator, arg);
         }
     }
@@ -184,7 +209,7 @@ fn executeGet(allocator: std.mem.Allocator, opts: *Options) !u8 {
     };
     defer store.deinit();
 
-    const stdout = std.io.getStdOut();
+    const stdout = getStdOut();
 
     if (opts.key) |key| {
         // Get specific key
@@ -325,7 +350,7 @@ fn executeList(allocator: std.mem.Allocator, opts: *Options) !u8 {
     };
     defer store.deinit();
 
-    const stdout = std.io.getStdOut();
+    const stdout = getStdOut();
     output.writeMultiListOutputToFile(stdout, &store) catch |err| {
         printErr("Error writing output: {}\n", .{err});
         return ExitCode.general_error;
@@ -334,7 +359,7 @@ fn executeList(allocator: std.mem.Allocator, opts: *Options) !u8 {
 }
 
 fn printHelp() void {
-    std.io.getStdOut().writeAll(
+    getStdOut().writeAll(
         \\enever - Secure environment variable management
         \\
         \\Usage: enever <command> [options]
