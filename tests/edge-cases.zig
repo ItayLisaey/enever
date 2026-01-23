@@ -523,3 +523,368 @@ test "connection string with special chars" {
     try env_parser.parseEnvContent(allocator, content, ".env", &store);
     try std.testing.expectEqualStrings("Server=myserver;Database=mydb;User=admin;Password=p@ss!word#123;", store.get("CONN").?.value);
 }
+
+// ============================================================================
+// MULTILINE VALUE PARSING
+// ============================================================================
+
+test "multiline JSON value with single quotes" {
+    const allocator = std.testing.allocator;
+    var store = env_parser.EnvStore.init(allocator);
+    defer store.deinit();
+
+    const content =
+        \\SHEETS_SERVICE_ACCOUNT_KEY='{
+        \\  "type": "service_account",
+        \\  "project_id": "test-project",
+        \\  "private_key": "-----BEGIN PRIVATE KEY-----\nMIIE\n-----END PRIVATE KEY-----\n"
+        \\}'
+        \\OTHER_KEY=simple_value
+        \\
+    ;
+
+    try env_parser.parseEnvContent(allocator, content, ".env", &store);
+
+    try std.testing.expectEqual(@as(usize, 2), store.count());
+
+    const json_value = store.get("SHEETS_SERVICE_ACCOUNT_KEY").?.value;
+    try std.testing.expect(std.mem.indexOf(u8, json_value, "\"type\": \"service_account\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json_value, "\"project_id\": \"test-project\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json_value, "-----BEGIN PRIVATE KEY-----") != null);
+
+    try std.testing.expectEqualStrings("simple_value", store.get("OTHER_KEY").?.value);
+}
+
+test "multiline JSON value with double quotes" {
+    const allocator = std.testing.allocator;
+    var store = env_parser.EnvStore.init(allocator);
+    defer store.deinit();
+
+    const content =
+        \\CONFIG="{
+        \\  \"name\": \"test\",
+        \\  \"value\": 123
+        \\}"
+        \\
+    ;
+
+    try env_parser.parseEnvContent(allocator, content, ".env", &store);
+
+    const config_value = store.get("CONFIG").?.value;
+    try std.testing.expect(std.mem.indexOf(u8, config_value, "\"name\": \"test\"") != null);
+}
+
+test "escaped quotes inside quoted value" {
+    const allocator = std.testing.allocator;
+    var store = env_parser.EnvStore.init(allocator);
+    defer store.deinit();
+
+    const content =
+        \\MESSAGE="He said \"Hello\" to me"
+        \\
+    ;
+
+    try env_parser.parseEnvContent(allocator, content, ".env", &store);
+
+    try std.testing.expectEqualStrings("He said \"Hello\" to me", store.get("MESSAGE").?.value);
+}
+
+test "multiline value in MultiEnvStore" {
+    const allocator = std.testing.allocator;
+    var store = env_parser.MultiEnvStore.init(allocator);
+    defer store.deinit();
+
+    const content =
+        \\JSON_KEY='{
+        \\  "nested": {
+        \\    "value": "test"
+        \\  }
+        \\}'
+        \\
+    ;
+
+    try env_parser.parseEnvContentMulti(content, ".env", &store);
+
+    const entry = store.get("JSON_KEY").?;
+    try std.testing.expectEqual(@as(usize, 1), entry.values.items.len);
+    try std.testing.expect(std.mem.indexOf(u8, entry.values.items[0].value, "\"nested\"") != null);
+}
+
+test "Google service account key parsing" {
+    const allocator = std.testing.allocator;
+    var store = env_parser.EnvStore.init(allocator);
+    defer store.deinit();
+
+    const content =
+        \\SHEETS_SERVICE_ACCOUNT_KEY='{
+        \\  "type": "service_account",
+        \\  "project_id": "my-project-123",
+        \\  "private_key_id": "abc123def456",
+        \\  "private_key": "-----BEGIN PRIVATE KEY-----\nMIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQC\n-----END PRIVATE KEY-----\n",
+        \\  "client_email": "service@my-project-123.iam.gserviceaccount.com",
+        \\  "client_id": "123456789",
+        \\  "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+        \\  "token_uri": "https://oauth2.googleapis.com/token"
+        \\}'
+        \\
+    ;
+
+    try env_parser.parseEnvContent(allocator, content, ".env", &store);
+
+    const value = store.get("SHEETS_SERVICE_ACCOUNT_KEY").?.value;
+
+    try std.testing.expect(std.mem.indexOf(u8, value, "\"type\": \"service_account\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, value, "\"project_id\": \"my-project-123\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, value, "\"private_key_id\": \"abc123def456\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, value, "-----BEGIN PRIVATE KEY-----") != null);
+    try std.testing.expect(std.mem.indexOf(u8, value, "-----END PRIVATE KEY-----") != null);
+    try std.testing.expect(std.mem.indexOf(u8, value, "\"client_email\":") != null);
+    try std.testing.expect(std.mem.indexOf(u8, value, "\"token_uri\":") != null);
+
+    try std.testing.expect(value.len > 2);
+    try std.testing.expectEqual(@as(u8, '{'), value[0]);
+    try std.testing.expectEqual(@as(u8, '}'), value[value.len - 1]);
+}
+
+test "multiline value followed by other vars" {
+    const allocator = std.testing.allocator;
+    var store = env_parser.EnvStore.init(allocator);
+    defer store.deinit();
+
+    const content =
+        \\FIRST=simple
+        \\MULTILINE='{
+        \\  "key": "value"
+        \\}'
+        \\AFTER_MULTILINE=also_works
+        \\LAST=final
+        \\
+    ;
+
+    try env_parser.parseEnvContent(allocator, content, ".env", &store);
+
+    try std.testing.expectEqual(@as(usize, 4), store.count());
+    try std.testing.expectEqualStrings("simple", store.get("FIRST").?.value);
+    try std.testing.expectEqualStrings("also_works", store.get("AFTER_MULTILINE").?.value);
+    try std.testing.expectEqualStrings("final", store.get("LAST").?.value);
+
+    const multiline = store.get("MULTILINE").?.value;
+    try std.testing.expect(std.mem.indexOf(u8, multiline, "\"key\": \"value\"") != null);
+}
+
+test "deeply nested JSON structure" {
+    const allocator = std.testing.allocator;
+    var store = env_parser.EnvStore.init(allocator);
+    defer store.deinit();
+
+    const content =
+        \\CONFIG='{
+        \\  "level1": {
+        \\    "level2": {
+        \\      "level3": {
+        \\        "deep_value": "found_it"
+        \\      }
+        \\    }
+        \\  }
+        \\}'
+        \\
+    ;
+
+    try env_parser.parseEnvContent(allocator, content, ".env", &store);
+
+    const value = store.get("CONFIG").?.value;
+    try std.testing.expect(std.mem.indexOf(u8, value, "\"deep_value\": \"found_it\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, value, "\"level1\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, value, "\"level2\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, value, "\"level3\"") != null);
+}
+
+test "embedded newlines as escape sequences" {
+    const allocator = std.testing.allocator;
+    var store = env_parser.EnvStore.init(allocator);
+    defer store.deinit();
+
+    const content =
+        \\PRIVATE_KEY="-----BEGIN RSA PRIVATE KEY-----\nMIIE\nABCD\n-----END RSA PRIVATE KEY-----"
+        \\
+    ;
+
+    try env_parser.parseEnvContent(allocator, content, ".env", &store);
+
+    const value = store.get("PRIVATE_KEY").?.value;
+
+    try std.testing.expect(std.mem.indexOf(u8, value, "-----BEGIN RSA PRIVATE KEY-----\nMIIE") != null);
+    try std.testing.expect(std.mem.indexOf(u8, value, "\n-----END RSA PRIVATE KEY-----") != null);
+
+    var newline_count: usize = 0;
+    for (value) |c| {
+        if (c == '\n') newline_count += 1;
+    }
+    try std.testing.expectEqual(@as(usize, 3), newline_count);
+}
+
+test "mixed quote styles in same file" {
+    const allocator = std.testing.allocator;
+    var store = env_parser.EnvStore.init(allocator);
+    defer store.deinit();
+
+    const content =
+        \\SINGLE_QUOTED='{
+        \\  "type": "single"
+        \\}'
+        \\DOUBLE_QUOTED="{
+        \\  \"type\": \"double\"
+        \\}"
+        \\UNQUOTED=plain_value
+        \\
+    ;
+
+    try env_parser.parseEnvContent(allocator, content, ".env", &store);
+
+    try std.testing.expectEqual(@as(usize, 3), store.count());
+
+    const single = store.get("SINGLE_QUOTED").?.value;
+    try std.testing.expect(std.mem.indexOf(u8, single, "\"type\": \"single\"") != null);
+
+    const double = store.get("DOUBLE_QUOTED").?.value;
+    try std.testing.expect(std.mem.indexOf(u8, double, "\"type\": \"double\"") != null);
+
+    try std.testing.expectEqualStrings("plain_value", store.get("UNQUOTED").?.value);
+}
+
+test "AWS credentials JSON format" {
+    const allocator = std.testing.allocator;
+    var store = env_parser.EnvStore.init(allocator);
+    defer store.deinit();
+
+    const content =
+        \\AWS_CREDENTIALS='{
+        \\  "accessKeyId": "AKIAIOSFODNN7EXAMPLE",
+        \\  "secretAccessKey": "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+        \\  "region": "us-west-2"
+        \\}'
+        \\
+    ;
+
+    try env_parser.parseEnvContent(allocator, content, ".env", &store);
+
+    const value = store.get("AWS_CREDENTIALS").?.value;
+    try std.testing.expect(std.mem.indexOf(u8, value, "\"accessKeyId\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, value, "\"secretAccessKey\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, value, "AKIAIOSFODNN7EXAMPLE") != null);
+}
+
+test "Firebase service account format" {
+    const allocator = std.testing.allocator;
+    var store = env_parser.EnvStore.init(allocator);
+    defer store.deinit();
+
+    const content =
+        \\FIREBASE_CONFIG='{
+        \\  "apiKey": "AIzaSyExample",
+        \\  "authDomain": "myapp.firebaseapp.com",
+        \\  "projectId": "myapp",
+        \\  "storageBucket": "myapp.appspot.com",
+        \\  "messagingSenderId": "123456789",
+        \\  "appId": "1:123456789:web:abc123"
+        \\}'
+        \\
+    ;
+
+    try env_parser.parseEnvContent(allocator, content, ".env", &store);
+
+    const value = store.get("FIREBASE_CONFIG").?.value;
+    try std.testing.expect(std.mem.indexOf(u8, value, "\"apiKey\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, value, "\"authDomain\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, value, "\"appId\"") != null);
+}
+
+test "multiline in MultiEnvStore with multiple files" {
+    const allocator = std.testing.allocator;
+    var store = env_parser.MultiEnvStore.init(allocator);
+    defer store.deinit();
+
+    const dev_content =
+        \\CONFIG='{
+        \\  "env": "development",
+        \\  "debug": true
+        \\}'
+        \\
+    ;
+
+    const prod_content =
+        \\CONFIG='{
+        \\  "env": "production",
+        \\  "debug": false
+        \\}'
+        \\
+    ;
+
+    try env_parser.parseEnvContentMulti(dev_content, ".env", &store);
+    try env_parser.parseEnvContentMulti(prod_content, ".env.production", &store);
+
+    const entry = store.get("CONFIG").?;
+    try std.testing.expectEqual(@as(usize, 2), entry.values.items.len);
+
+    try std.testing.expect(std.mem.indexOf(u8, entry.values.items[0].value, "\"env\": \"development\"") != null);
+    try std.testing.expectEqualStrings(".env", entry.values.items[0].source_file);
+
+    try std.testing.expect(std.mem.indexOf(u8, entry.values.items[1].value, "\"env\": \"production\"") != null);
+    try std.testing.expectEqualStrings(".env.production", entry.values.items[1].source_file);
+}
+
+test "unclosed quote at end of file" {
+    const allocator = std.testing.allocator;
+    var store = env_parser.EnvStore.init(allocator);
+    defer store.deinit();
+
+    const content =
+        \\KEY='unclosed value
+    ;
+
+    try env_parser.parseEnvContent(allocator, content, ".env", &store);
+
+    const value = store.get("KEY").?.value;
+    try std.testing.expectEqualStrings("unclosed value", value);
+}
+
+test "empty JSON objects and arrays" {
+    const allocator = std.testing.allocator;
+    var store = env_parser.EnvStore.init(allocator);
+    defer store.deinit();
+
+    const content =
+        \\EMPTY_JSON='{}'
+        \\EMPTY_ARRAY='[]'
+        \\
+    ;
+
+    try env_parser.parseEnvContent(allocator, content, ".env", &store);
+
+    try std.testing.expectEqualStrings("{}", store.get("EMPTY_JSON").?.value);
+    try std.testing.expectEqualStrings("[]", store.get("EMPTY_ARRAY").?.value);
+}
+
+test "JSON array value" {
+    const allocator = std.testing.allocator;
+    var store = env_parser.EnvStore.init(allocator);
+    defer store.deinit();
+
+    const content =
+        \\ALLOWED_ORIGINS='[
+        \\  "http://localhost:3000",
+        \\  "https://myapp.com",
+        \\  "https://staging.myapp.com"
+        \\]'
+        \\
+    ;
+
+    try env_parser.parseEnvContent(allocator, content, ".env", &store);
+
+    const value = store.get("ALLOWED_ORIGINS").?.value;
+    try std.testing.expect(std.mem.indexOf(u8, value, "\"http://localhost:3000\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, value, "\"https://myapp.com\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, value, "\"https://staging.myapp.com\"") != null);
+    try std.testing.expectEqual(@as(u8, '['), value[0]);
+    try std.testing.expectEqual(@as(u8, ']'), value[value.len - 1]);
+}
