@@ -57,7 +57,7 @@ function httpsGet(url) {
   });
 }
 
-async function getLatestReleaseUrl(artifactName) {
+async function getLatestRelease(artifactName) {
   const apiUrl = `https://api.github.com/repos/${REPO}/releases/latest`;
 
   return new Promise((resolve, reject) => {
@@ -77,7 +77,10 @@ async function getLatestReleaseUrl(artifactName) {
               reject(new Error(`No binary found for ${artifactName}`));
               return;
             }
-            resolve(asset.browser_download_url);
+            resolve({
+              version: release.tag_name.replace(/^v/, ""),
+              downloadUrl: asset.browser_download_url,
+            });
           } catch (e) {
             reject(e);
           }
@@ -85,6 +88,19 @@ async function getLatestReleaseUrl(artifactName) {
       })
       .on("error", reject);
   });
+}
+
+function getInstalledVersion() {
+  if (!fs.existsSync(BINARY_PATH)) {
+    return null;
+  }
+  try {
+    const output = execSync(`"${BINARY_PATH}" --version`, { encoding: "utf8" });
+    const match = output.match(/(\d+\.\d+\.\d+)/);
+    return match ? match[1] : null;
+  } catch {
+    return null;
+  }
 }
 
 async function downloadAndExtract(url, extension) {
@@ -135,18 +151,27 @@ async function downloadAndExtract(url, extension) {
 
 async function main() {
   try {
-    if (fs.existsSync(BINARY_PATH)) {
-      console.log("enever binary already exists, skipping download.");
+    const { artifactName, extension } = getPlatformInfo();
+    const installedVersion = getInstalledVersion();
+
+    console.log(`Checking for enever updates (${process.platform}-${process.arch})...`);
+
+    const { version: latestVersion, downloadUrl } = await getLatestRelease(artifactName);
+
+    if (installedVersion === latestVersion) {
+      console.log(`enever ${installedVersion} is already up to date.`);
       return;
     }
 
-    const { artifactName, extension } = getPlatformInfo();
-    console.log(`Installing enever for ${process.platform}-${process.arch}...`);
+    if (installedVersion) {
+      console.log(`Updating enever from ${installedVersion} to ${latestVersion}...`);
+    } else {
+      console.log(`Installing enever ${latestVersion}...`);
+    }
 
-    const downloadUrl = await getLatestReleaseUrl(artifactName);
     await downloadAndExtract(downloadUrl, extension);
 
-    console.log("enever installed successfully!");
+    console.log(`enever ${latestVersion} installed successfully!`);
   } catch (error) {
     console.error("Failed to install enever:", error.message);
     console.error("You can download the binary manually from:");
