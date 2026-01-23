@@ -16,7 +16,7 @@ pub fn main() !void {
     const result = cli.run(allocator) catch |err| {
         var buf: [256]u8 = undefined;
         const msg = std.fmt.bufPrint(&buf, "Error: {}\n", .{err}) catch "Error occurred\n";
-        std.fs.File.stderr().writeAll(msg) catch {};
+        std.io.getStdErr().writeAll(msg) catch {};
         std.process.exit(1);
     };
 

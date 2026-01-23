@@ -43,13 +43,13 @@ pub const Options = struct {
 fn printErr(comptime fmt: []const u8, args: anytype) void {
     var buf: [1024]u8 = undefined;
     const msg = std.fmt.bufPrint(&buf, fmt, args) catch return;
-    std.fs.File.stderr().writeAll(msg) catch {};
+    std.io.getStdErr().writeAll(msg) catch {};
 }
 
 fn printOut(comptime fmt: []const u8, args: anytype) void {
     var buf: [4096]u8 = undefined;
     const msg = std.fmt.bufPrint(&buf, fmt, args) catch return;
-    std.fs.File.stdout().writeAll(msg) catch {};
+    std.io.getStdOut().writeAll(msg) catch {};
 }
 
 fn printQuiet(opts: *const Options, comptime fmt: []const u8, args: anytype) void {
@@ -184,7 +184,7 @@ fn executeGet(allocator: std.mem.Allocator, opts: *Options) !u8 {
     };
     defer store.deinit();
 
-    const stdout = std.fs.File.stdout();
+    const stdout = std.io.getStdOut();
 
     if (opts.key) |key| {
         // Get specific key
@@ -325,7 +325,7 @@ fn executeList(allocator: std.mem.Allocator, opts: *Options) !u8 {
     };
     defer store.deinit();
 
-    const stdout = std.fs.File.stdout();
+    const stdout = std.io.getStdOut();
     output.writeMultiListOutputToFile(stdout, &store) catch |err| {
         printErr("Error writing output: {}\n", .{err});
         return ExitCode.general_error;
@@ -334,7 +334,7 @@ fn executeList(allocator: std.mem.Allocator, opts: *Options) !u8 {
 }
 
 fn printHelp() void {
-    std.fs.File.stdout().writeAll(
+    std.io.getStdOut().writeAll(
         \\enever - Secure environment variable management
         \\
         \\Usage: enever <command> [options]
