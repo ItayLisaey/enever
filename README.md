@@ -36,7 +36,7 @@ sudo mv enever /usr/local/bin/
 
 ### Build from source
 
-Requires [Zig](https://ziglang.org/) 0.15.0+:
+Requires [Zig](https://ziglang.org/) 0.15.2+:
 
 ```bash
 git clone https://github.com/itaylisaey/enever.git
