@@ -738,4 +738,3 @@ test "multi env store - file tracking" {
     try std.testing.expectEqualStrings(".env", store.files.items[0]);
     try std.testing.expectEqualStrings(".env.production", store.files.items[1]);
 }
-
