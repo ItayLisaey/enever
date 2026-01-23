@@ -1,0 +1,35 @@
+{
+  "name": "enever",
+  "version": "0.1.0",
+  "description": "Secure environment variable management for your projects",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/itaylisaey/enever.git"
+  },
+  "homepage": "https://github.com/itaylisaey/enever#readme",
+  "bugs": {
+    "url": "https://github.com/itaylisaey/enever/issues"
+  },
+  "author": "itaylisaey",
+  "keywords": [
+    "env",
+    "environment",
+    "dotenv",
+    "security",
+    "cli"
+  ],
+  "bin": {
+    "enever": "bin/enever.js"
+  },
+  "scripts": {
+    "postinstall": "node scripts/postinstall.js"
+  },
+  "engines": {
+    "node": ">=14"
+  },
+  "files": [
+    "bin",
+    "scripts"
+  ]
+}

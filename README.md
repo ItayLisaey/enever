@@ -12,6 +12,18 @@ Secure environment variable management for your projects.
 
 ## Installation
 
+### npm (recommended)
+
+```bash
+npm install -g enever
+```
+
+Or use directly with npx:
+
+```bash
+npx enever get
+```
+
 ### Pre-built binaries
 
 Download from [GitHub Releases](https://github.com/itaylisaey/enever/releases):
