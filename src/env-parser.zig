@@ -231,37 +231,169 @@ pub fn parseEnvFile(allocator: std.mem.Allocator, path: []const u8, store: *EnvS
     try parseEnvContent(allocator, content, path, store);
 }
 
-pub fn parseEnvContent(_: std.mem.Allocator, content: []const u8, source_file: []const u8, store: *EnvStore) ParseError!void {
-    var lines = std.mem.splitScalar(u8, content, '\n');
+pub fn parseEnvContent(allocator: std.mem.Allocator, content: []const u8, source_file: []const u8, store: *EnvStore) ParseError!void {
+    var i: usize = 0;
 
-    while (lines.next()) |line| {
-        const trimmed = std.mem.trim(u8, line, " \t\r");
+    while (i < content.len) {
+        // Skip whitespace and find start of line
+        while (i < content.len and (content[i] == ' ' or content[i] == '\t' or content[i] == '\r' or content[i] == '\n')) {
+            i += 1;
+        }
+        if (i >= content.len) break;
 
-        // Skip empty lines and comments
-        if (trimmed.len == 0 or trimmed[0] == '#') {
+        // Skip comments
+        if (content[i] == '#') {
+            while (i < content.len and content[i] != '\n') {
+                i += 1;
+            }
             continue;
         }
 
         // Find the = separator
-        const eq_pos = std.mem.indexOfScalar(u8, trimmed, '=') orelse continue;
+        const line_start = i;
+        var eq_pos: ?usize = null;
+        while (i < content.len and content[i] != '\n' and content[i] != '=') {
+            i += 1;
+        }
+        if (i >= content.len or content[i] == '\n') {
+            // No = found on this line, skip it
+            continue;
+        }
+        eq_pos = i;
+        i += 1; // Skip the '='
 
-        const key = std.mem.trim(u8, trimmed[0..eq_pos], " \t");
-        if (key.len == 0) continue;
-
-        var value = trimmed[eq_pos + 1 ..];
-        value = std.mem.trim(u8, value, " \t");
-
-        // Handle quoted values
-        if (value.len >= 2) {
-            if ((value[0] == '"' and value[value.len - 1] == '"') or
-                (value[0] == '\'' and value[value.len - 1] == '\''))
-            {
-                value = value[1 .. value.len - 1];
+        const key = std.mem.trim(u8, content[line_start..eq_pos.?], " \t\r");
+        if (key.len == 0) {
+            // Skip to end of line
+            while (i < content.len and content[i] != '\n') {
+                i += 1;
             }
+            continue;
         }
 
-        store.put(key, value, source_file) catch return error.OutOfMemory;
+        // Skip whitespace after =
+        while (i < content.len and (content[i] == ' ' or content[i] == '\t')) {
+            i += 1;
+        }
+
+        // Parse the value
+        var value: []const u8 = undefined;
+        if (i < content.len and (content[i] == '"' or content[i] == '\'')) {
+            // Quoted value - find matching closing quote
+            const quote_char = content[i];
+            i += 1; // Skip opening quote
+            const value_start = i;
+
+            // Find closing quote, handling escaped quotes and newlines
+            while (i < content.len) {
+                if (content[i] == quote_char) {
+                    // Check if it's escaped
+                    var backslash_count: usize = 0;
+                    var j = i;
+                    while (j > value_start and content[j - 1] == '\\') {
+                        backslash_count += 1;
+                        j -= 1;
+                    }
+                    if (backslash_count % 2 == 0) {
+                        // Not escaped, this is the closing quote
+                        break;
+                    }
+                }
+                i += 1;
+            }
+
+            value = content[value_start..i];
+            if (i < content.len) {
+                i += 1; // Skip closing quote
+            }
+        } else {
+            // Unquoted value - read until end of line
+            const value_start = i;
+            while (i < content.len and content[i] != '\n') {
+                i += 1;
+            }
+            value = std.mem.trimRight(u8, content[value_start..i], " \t\r");
+        }
+
+        // Store the value (need to process escape sequences for quoted values)
+        const processed_value = try processEscapeSequences(allocator, value);
+        defer allocator.free(processed_value);
+
+        store.put(key, processed_value, source_file) catch return error.OutOfMemory;
     }
+}
+
+/// Process escape sequences in a string (like \n, \t, \\)
+fn processEscapeSequences(allocator: std.mem.Allocator, input: []const u8) ![]const u8 {
+    // First pass: count the output size
+    var output_len: usize = 0;
+    var j: usize = 0;
+    while (j < input.len) {
+        if (input[j] == '\\' and j + 1 < input.len) {
+            const next = input[j + 1];
+            if (next == 'n' or next == 't' or next == 'r' or next == '\\' or next == '"' or next == '\'') {
+                output_len += 1;
+                j += 2;
+                continue;
+            }
+        }
+        output_len += 1;
+        j += 1;
+    }
+
+    // Second pass: build the output
+    const output = try allocator.alloc(u8, output_len);
+    var out_idx: usize = 0;
+    j = 0;
+    while (j < input.len) {
+        if (input[j] == '\\' and j + 1 < input.len) {
+            const next = input[j + 1];
+            switch (next) {
+                'n' => {
+                    output[out_idx] = '\n';
+                    out_idx += 1;
+                    j += 2;
+                    continue;
+                },
+                't' => {
+                    output[out_idx] = '\t';
+                    out_idx += 1;
+                    j += 2;
+                    continue;
+                },
+                'r' => {
+                    output[out_idx] = '\r';
+                    out_idx += 1;
+                    j += 2;
+                    continue;
+                },
+                '\\' => {
+                    output[out_idx] = '\\';
+                    out_idx += 1;
+                    j += 2;
+                    continue;
+                },
+                '"' => {
+                    output[out_idx] = '"';
+                    out_idx += 1;
+                    j += 2;
+                    continue;
+                },
+                '\'' => {
+                    output[out_idx] = '\'';
+                    out_idx += 1;
+                    j += 2;
+                    continue;
+                },
+                else => {},
+            }
+        }
+        output[out_idx] = input[j];
+        out_idx += 1;
+        j += 1;
+    }
+
+    return output;
 }
 
 /// Discover all .env* files in the current directory
@@ -353,35 +485,94 @@ pub fn parseEnvFileMulti(allocator: std.mem.Allocator, path: []const u8, store: 
 
 /// Parse env content into MultiEnvStore
 pub fn parseEnvContentMulti(content: []const u8, source_file: []const u8, store: *MultiEnvStore) ParseError!void {
-    var lines = std.mem.splitScalar(u8, content, '\n');
+    var i: usize = 0;
 
-    while (lines.next()) |line| {
-        const trimmed = std.mem.trim(u8, line, " \t\r");
+    while (i < content.len) {
+        // Skip whitespace and find start of line
+        while (i < content.len and (content[i] == ' ' or content[i] == '\t' or content[i] == '\r' or content[i] == '\n')) {
+            i += 1;
+        }
+        if (i >= content.len) break;
 
-        // Skip empty lines and comments
-        if (trimmed.len == 0 or trimmed[0] == '#') {
+        // Skip comments
+        if (content[i] == '#') {
+            while (i < content.len and content[i] != '\n') {
+                i += 1;
+            }
             continue;
         }
 
         // Find the = separator
-        const eq_pos = std.mem.indexOfScalar(u8, trimmed, '=') orelse continue;
+        const line_start = i;
+        var eq_pos: ?usize = null;
+        while (i < content.len and content[i] != '\n' and content[i] != '=') {
+            i += 1;
+        }
+        if (i >= content.len or content[i] == '\n') {
+            // No = found on this line, skip it
+            continue;
+        }
+        eq_pos = i;
+        i += 1; // Skip the '='
 
-        const key = std.mem.trim(u8, trimmed[0..eq_pos], " \t");
-        if (key.len == 0) continue;
-
-        var value = trimmed[eq_pos + 1 ..];
-        value = std.mem.trim(u8, value, " \t");
-
-        // Handle quoted values
-        if (value.len >= 2) {
-            if ((value[0] == '"' and value[value.len - 1] == '"') or
-                (value[0] == '\'' and value[value.len - 1] == '\''))
-            {
-                value = value[1 .. value.len - 1];
+        const key = std.mem.trim(u8, content[line_start..eq_pos.?], " \t\r");
+        if (key.len == 0) {
+            // Skip to end of line
+            while (i < content.len and content[i] != '\n') {
+                i += 1;
             }
+            continue;
         }
 
-        store.put(key, value, source_file) catch return error.OutOfMemory;
+        // Skip whitespace after =
+        while (i < content.len and (content[i] == ' ' or content[i] == '\t')) {
+            i += 1;
+        }
+
+        // Parse the value
+        var value: []const u8 = undefined;
+        if (i < content.len and (content[i] == '"' or content[i] == '\'')) {
+            // Quoted value - find matching closing quote
+            const quote_char = content[i];
+            i += 1; // Skip opening quote
+            const value_start = i;
+
+            // Find closing quote, handling escaped quotes and newlines
+            while (i < content.len) {
+                if (content[i] == quote_char) {
+                    // Check if it's escaped
+                    var backslash_count: usize = 0;
+                    var j = i;
+                    while (j > value_start and content[j - 1] == '\\') {
+                        backslash_count += 1;
+                        j -= 1;
+                    }
+                    if (backslash_count % 2 == 0) {
+                        // Not escaped, this is the closing quote
+                        break;
+                    }
+                }
+                i += 1;
+            }
+
+            value = content[value_start..i];
+            if (i < content.len) {
+                i += 1; // Skip closing quote
+            }
+        } else {
+            // Unquoted value - read until end of line
+            const value_start = i;
+            while (i < content.len and content[i] != '\n') {
+                i += 1;
+            }
+            value = std.mem.trimRight(u8, content[value_start..i], " \t\r");
+        }
+
+        // Store the value (need to process escape sequences for quoted values)
+        const processed_value = processEscapeSequences(store.allocator, value) catch return error.OutOfMemory;
+        defer store.allocator.free(processed_value);
+
+        store.put(key, processed_value, source_file) catch return error.OutOfMemory;
     }
 }
 
@@ -546,4 +737,88 @@ test "multi env store - file tracking" {
     try std.testing.expectEqual(@as(usize, 2), store.files.items.len);
     try std.testing.expectEqualStrings(".env", store.files.items[0]);
     try std.testing.expectEqualStrings(".env.production", store.files.items[1]);
+}
+
+test "parse multiline JSON value with single quotes" {
+    const allocator = std.testing.allocator;
+    var store = EnvStore.init(allocator);
+    defer store.deinit();
+
+    const content =
+        \\SHEETS_SERVICE_ACCOUNT_KEY='{
+        \\  "type": "service_account",
+        \\  "project_id": "test-project",
+        \\  "private_key": "-----BEGIN PRIVATE KEY-----\nMIIE\n-----END PRIVATE KEY-----\n"
+        \\}'
+        \\OTHER_KEY=simple_value
+        \\
+    ;
+
+    try parseEnvContent(allocator, content, ".env", &store);
+
+    try std.testing.expectEqual(@as(usize, 2), store.count());
+
+    const json_value = store.get("SHEETS_SERVICE_ACCOUNT_KEY").?.value;
+    // The value should contain the full JSON with newlines preserved
+    try std.testing.expect(std.mem.indexOf(u8, json_value, "\"type\": \"service_account\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json_value, "\"project_id\": \"test-project\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json_value, "-----BEGIN PRIVATE KEY-----") != null);
+
+    try std.testing.expectEqualStrings("simple_value", store.get("OTHER_KEY").?.value);
+}
+
+test "parse multiline JSON value with double quotes" {
+    const allocator = std.testing.allocator;
+    var store = EnvStore.init(allocator);
+    defer store.deinit();
+
+    const content =
+        \\CONFIG="{
+        \\  \"name\": \"test\",
+        \\  \"value\": 123
+        \\}"
+        \\
+    ;
+
+    try parseEnvContent(allocator, content, ".env", &store);
+
+    const config_value = store.get("CONFIG").?.value;
+    // Should contain the JSON structure (with escape sequences processed)
+    try std.testing.expect(std.mem.indexOf(u8, config_value, "\"name\": \"test\"") != null);
+}
+
+test "parse value with escaped quotes inside" {
+    const allocator = std.testing.allocator;
+    var store = EnvStore.init(allocator);
+    defer store.deinit();
+
+    const content =
+        \\MESSAGE="He said \"Hello\" to me"
+        \\
+    ;
+
+    try parseEnvContent(allocator, content, ".env", &store);
+
+    try std.testing.expectEqualStrings("He said \"Hello\" to me", store.get("MESSAGE").?.value);
+}
+
+test "multiline value in MultiEnvStore" {
+    const allocator = std.testing.allocator;
+    var store = MultiEnvStore.init(allocator);
+    defer store.deinit();
+
+    const content =
+        \\JSON_KEY='{
+        \\  "nested": {
+        \\    "value": "test"
+        \\  }
+        \\}'
+        \\
+    ;
+
+    try parseEnvContentMulti(content, ".env", &store);
+
+    const entry = store.get("JSON_KEY").?;
+    try std.testing.expectEqual(@as(usize, 1), entry.values.items.len);
+    try std.testing.expect(std.mem.indexOf(u8, entry.values.items[0].value, "\"nested\"") != null);
 }

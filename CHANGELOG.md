@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.1] - 2025-01-23
+
+### Fixed
+
+- Fixed parsing of multiline quoted values (e.g., JSON strings spanning multiple lines)
+- Properly handle escape sequences (`\n`, `\t`, `\\`, `\"`, `\'`) within quoted values
+- Service account keys and other multiline JSON values now parse correctly
+
 ## [0.2.0] - 2025-01-23
 
 ### Added
@@ -36,5 +44,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Pre-built binaries for Linux (x64, arm64), macOS (x64, arm64), Windows (x64)
   - SHA256 checksums for all releases
 
-[Unreleased]: https://github.com/itaylisaey/enever/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/itaylisaey/enever/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/itaylisaey/enever/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/itaylisaey/enever/releases/tag/v0.2.0
