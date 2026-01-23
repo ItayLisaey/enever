@@ -1,0 +1,17 @@
+# Environment files
+.env
++.env.*
+
+# AI and agent-related files
+.context/
+.claude/
+CLAUDE.md
+claude.md
+
+# Zig build artifacts
+zig-out/
+.zig-cache/
+*.o
+*.a
+*.so
+*.dylib
