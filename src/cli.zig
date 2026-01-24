@@ -1,20 +1,40 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const env_parser = @import("env-parser.zig");
 const masking = @import("masking.zig");
 const output = @import("output.zig");
 
 pub const version = "0.2.1";
 
+// Zig version compatibility helpers for stdout/stderr/stdin
 fn getStdOut() std.fs.File {
-    return std.fs.File.stdout();
+    if (comptime builtin.zig_version.order(.{ .major = 0, .minor = 14, .patch = 0 }) == .gt) {
+        // Zig 0.15+
+        return std.fs.File.stdout();
+    } else {
+        // Zig 0.14.x and earlier
+        return std.io.getStdOut();
+    }
 }
 
 fn getStdErr() std.fs.File {
-    return std.fs.File.stderr();
+    if (comptime builtin.zig_version.order(.{ .major = 0, .minor = 14, .patch = 0 }) == .gt) {
+        // Zig 0.15+
+        return std.fs.File.stderr();
+    } else {
+        // Zig 0.14.x and earlier
+        return std.io.getStdErr();
+    }
 }
 
 fn getStdIn() std.fs.File {
-    return std.fs.File.stdin();
+    if (comptime builtin.zig_version.order(.{ .major = 0, .minor = 14, .patch = 0 }) == .gt) {
+        // Zig 0.15+
+        return std.fs.File.stdin();
+    } else {
+        // Zig 0.14.x and earlier
+        return std.io.getStdIn();
+    }
 }
 
 pub const ExitCode = struct {
