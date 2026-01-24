@@ -23,7 +23,11 @@
     "enever": "bin/enever.js"
   },
   "scripts": {
-    "postinstall": "node scripts/postinstall.js"
+    "postinstall": "node scripts/postinstall.js",
+    "test": "bun test"
+  },
+  "devDependencies": {
+    "@types/bun": "latest"
   },
   "engines": {
     "node": ">=14"

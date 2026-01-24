@@ -1,151 +1,127 @@
 # enever
 
-Secure environment variable management for your projects.
+Protect your secrets from AI coding assistants.
 
-**enever** masks sensitive values by default, reads all `.env.*` files simultaneously, and provides audit logging for compliance.
-
-## Features
-
-- **Security-first**: All values masked by default, explicit unmasking required
-- **Multi-file view**: See values from all `.env.*` files at once
-- **Zero dependencies**: Single static binary, works everywhere
-
-## Installation
-
-### npm (recommended)
+AI tools like Claude Code, Cursor, and Copilot automatically read your `.env` files, exposing API keys and passwords to their context. **enever** forces AI to use masked values instead.
 
 ```bash
 npm install -g enever
 ```
 
-Or use directly with npx:
+## How It Works
 
 ```bash
-npx enever get
-```
-
-### Pre-built binaries
-
-Download from [GitHub Releases](https://github.com/itaylisaey/enever/releases):
-
-```bash
-# macOS (Apple Silicon)
-curl -L https://github.com/itaylisaey/enever/releases/latest/download/enever-darwin-aarch64.tar.gz | tar xz
-sudo mv enever /usr/local/bin/
-
-# macOS (Intel)
-curl -L https://github.com/itaylisaey/enever/releases/latest/download/enever-darwin-x86_64.tar.gz | tar xz
-sudo mv enever /usr/local/bin/
-
-# Linux (x64)
-curl -L https://github.com/itaylisaey/enever/releases/latest/download/enever-linux-x86_64.tar.gz | tar xz
-sudo mv enever /usr/local/bin/
-
-# Linux (arm64)
-curl -L https://github.com/itaylisaey/enever/releases/latest/download/enever-linux-aarch64.tar.gz | tar xz
-sudo mv enever /usr/local/bin/
-```
-
-### Build from source
-
-Requires [Zig](https://ziglang.org/) 0.14.0+:
-
-```bash
-git clone https://github.com/itaylisaey/enever.git
-cd enever
-zig build -Doptimize=ReleaseSafe
-./zig-out/bin/enever --version
-```
-
-## Quick Start
-
-```bash
-# Create some .env files
-echo "DATABASE_URL=postgres://localhost/dev" > .env
-echo "API_KEY=sk_dev_secret123" >> .env
-
-echo "DATABASE_URL=postgres://prod-server/app" > .env.production
-echo "API_KEY=sk_prod_secret456" >> .env.production
-
-# View all variables (shows values from each file)
-enever get
+enever read
 # DATABASE_URL:
-#   .env:            ****ost/dev
-#   .env.production: ****ver/app
+#   .env:            ****host/dev
+#   .env.production: ****host/prod
 # API_KEY:
 #   .env:            ****t123
 #   .env.production: ****t456
-
-# Get a specific key
-enever get API_KEY
-# .env:            ****t123
-# .env.production: ****t456
-
-# Unmask a specific key
-enever get -u API_KEY
-# .env:            sk_dev_secret123
-# .env.production: sk_prod_secret456
-
-# List all keys
-enever list
-# API_KEY
-# DATABASE_URL
 ```
+
+All values are masked by default. AI sees `****t123`, not your actual secrets.
 
 ## Commands
 
 | Command | Description |
 |---------|-------------|
-| `get [KEY]` | Get all variables or a specific key |
-| `set KEY=VALUE` | Set a key-value pair in `.env.local` |
-| `list` | List all keys (no values) |
+| `enever read` | Read all variables (masked) |
+| `enever read KEY` | Read specific variable |
+| `enever read ./path` | Read from another directory |
+| `enever write KEY=value` | Write to .env.local |
+| `enever write --file .env.prod KEY=val` | Write to specific file |
+| `enever delete KEY` | Delete from .env.local |
+| `enever diff .env .env.prod` | Compare two files |
+| `enever list` | List keys only (no values) |
+| `enever read -u KEY` | Unmask a specific key |
+| `enever read --json` | JSON output |
 
-## Options
+## Setup for AI Protection
 
-| Option | Description |
-|--------|-------------|
-| `-u, --unmask KEY` | Show raw value of a protected key |
-| `--json` | Output in JSON format |
-| `-q, --quiet` | Suppress non-essential output |
-| `-h, --help` | Show help |
-| `-v, --version` | Show version |
+### 1. Agent Skill
 
-## Multi-File View
+Create `.skills/env-management/SKILL.md`:
 
-enever discovers and loads all `.env*` files in the current directory:
+```yaml
+---
+name: env-management
+description: |
+  Safely access environment variables. Use when checking env vars,
+  API keys, database URLs, or any .env file contents.
+  ALWAYS use enever CLI instead of reading .env files directly.
+allowed-tools: Bash(enever:*)
+---
 
-- `.env` - Base configuration
-- `.env.development` - Development settings
-- `.env.production` - Production settings
-- `.env.staging` - Staging settings
-- `.env.local` - Local overrides (should be gitignored)
-- Any other `.env.*` files
+# Environment Variable Management
 
-All files are shown simultaneously, letting you compare values across environments at a glance.
+Use `enever` for all .env operations. Values are masked by default.
 
-## Exit Codes
+## Commands
 
-| Code | Meaning |
-|------|---------|
-| 0 | Success |
-| 1 | General error |
-| 2 | Key/variable not found |
+- `enever list` - List all keys (no values)
+- `enever read` - Read all variables (masked)
+- `enever read KEY` - Read specific variable
+- `enever write KEY=value` - Write to .env.local
+- `enever delete KEY` - Delete from .env.local
 
-## JSON Output
+## Rules
 
-```bash
-# Get all variables as JSON
-enever get --json
-
-# Get specific key as JSON
-enever get --json API_KEY
+1. NEVER read .env files directly
+2. NEVER use cat/grep/head on .env files
+3. ALWAYS use enever commands
 ```
 
-## Security
+### 2. AGENTS.md
 
-- All values are masked by default (shows `****` + last 4 characters)
-- No network calls - works completely offline
+Create `AGENTS.md` in project root:
+
+```markdown
+# AI Agent Guidelines
+
+## Environment Variables
+
+Use `enever` for all .env operations. Do not read .env files directly.
+
+- `enever list` - see available keys
+- `enever read` - see masked values
+- `enever write KEY=value` - modify .env.local
+```
+
+### 3. Block Direct Access (Claude Code)
+
+Create `.claude/settings.json`:
+
+```json
+{
+  "permissions": {
+    "deny": [
+      "Read(.env)", "Read(.env.*)", "Read(**/.env)", "Read(**/.env.*)",
+      "Bash(cat:*.env*)", "Bash(grep:*.env*)"
+    ],
+    "allow": ["Bash(enever:*)"]
+  }
+}
+```
+
+## Why This Works
+
+- **[Agent Skills](https://agentskills.io)** - Open standard supported by Claude, Cursor, Copilot, Codex, and 25+ AI tools
+- **AGENTS.md** - Universal instructions read by all major AI assistants
+- **Permission blocks** - Hard blocks prevent direct .env access
+
+## Installation
+
+```bash
+# npm
+npm install -g enever
+
+# or use directly
+npx enever read
+```
+
+Pre-built binaries available on [GitHub Releases](https://github.com/itaylisaey/enever/releases).
 
 ## License
 
-MIT License - see [LICENSE](LICENSE) for details.
+MIT

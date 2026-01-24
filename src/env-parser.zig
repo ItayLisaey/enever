@@ -396,7 +396,29 @@ fn processEscapeSequences(allocator: std.mem.Allocator, input: []const u8) ![]co
     return output;
 }
 
-/// Discover all .env* files in the current directory
+/// Check if a filename matches env file patterns (.env, .env.*, +.env, +.env.*)
+fn isEnvFile(name: []const u8) bool {
+    // Match .env or +.env
+    if (std.mem.eql(u8, name, ".env") or std.mem.eql(u8, name, "+.env")) {
+        return true;
+    }
+    // Match .env.* (e.g., .env.local, .env.production)
+    if (std.mem.startsWith(u8, name, ".env.") and name.len > 5) {
+        return true;
+    }
+    // Match +.env.* (e.g., +.env.local, +.env.production)
+    if (std.mem.startsWith(u8, name, "+.env.") and name.len > 6) {
+        return true;
+    }
+    return false;
+}
+
+/// Check if file is a "base" env file (.env or +.env) for sorting priority
+fn isBaseEnvFile(name: []const u8) bool {
+    return std.mem.eql(u8, name, ".env") or std.mem.eql(u8, name, "+.env");
+}
+
+/// Discover all .env* and +.env* files in the current directory
 pub fn discoverEnvFiles(allocator: std.mem.Allocator) !std.ArrayListUnmanaged([]const u8) {
     var files: std.ArrayListUnmanaged([]const u8) = .{};
     errdefer {
@@ -416,21 +438,18 @@ pub fn discoverEnvFiles(allocator: std.mem.Allocator) !std.ArrayListUnmanaged([]
     while (iter.next() catch null) |entry| {
         if (entry.kind != .file) continue;
 
-        // Match .env or .env.*
-        if (std.mem.eql(u8, entry.name, ".env") or
-            (std.mem.startsWith(u8, entry.name, ".env.") and entry.name.len > 5))
-        {
+        if (isEnvFile(entry.name)) {
             const owned = try allocator.dupe(u8, entry.name);
             try files.append(allocator, owned);
         }
     }
 
-    // Sort files: .env first, then .env.* alphabetically
+    // Sort files: base env files first (.env, +.env), then others alphabetically
     std.mem.sort([]const u8, files.items, {}, struct {
         fn lessThan(_: void, a: []const u8, b: []const u8) bool {
-            // .env always comes first
-            if (std.mem.eql(u8, a, ".env")) return true;
-            if (std.mem.eql(u8, b, ".env")) return false;
+            // Base env files always come first
+            if (isBaseEnvFile(a) and !isBaseEnvFile(b)) return true;
+            if (!isBaseEnvFile(a) and isBaseEnvFile(b)) return false;
             // Then alphabetically
             return std.mem.lessThan(u8, a, b);
         }
@@ -458,6 +477,99 @@ pub fn loadAllEnvFiles(allocator: std.mem.Allocator) !MultiEnvStore {
     }
 
     return store;
+}
+
+/// Load env files from a specific path (file or directory)
+pub fn loadEnvFilesFromPath(allocator: std.mem.Allocator, path: []const u8) !MultiEnvStore {
+    var store = MultiEnvStore.init(allocator);
+    errdefer store.deinit();
+
+    // Check if path is a file or directory
+    const stat = std.fs.cwd().statFile(path) catch |err| {
+        return switch (err) {
+            error.FileNotFound => error.FileNotFound,
+            error.AccessDenied => error.AccessDenied,
+            else => error.Unexpected,
+        };
+    };
+
+    if (stat.kind == .directory) {
+        // It's a directory - discover .env* files in it
+        var dir = std.fs.cwd().openDir(path, .{ .iterate = true }) catch |err| {
+            return switch (err) {
+                error.AccessDenied => error.AccessDenied,
+                else => error.Unexpected,
+            };
+        };
+        defer dir.close();
+
+        var files: std.ArrayListUnmanaged([]const u8) = .{};
+        defer {
+            for (files.items) |f| allocator.free(f);
+            files.deinit(allocator);
+        }
+
+        var iter = dir.iterate();
+        while (iter.next() catch null) |entry| {
+            if (entry.kind != .file) continue;
+            if (isEnvFile(entry.name)) {
+                const owned = try allocator.dupe(u8, entry.name);
+                try files.append(allocator, owned);
+            }
+        }
+
+        // Sort files: base env files first, then others alphabetically
+        std.mem.sort([]const u8, files.items, {}, struct {
+            fn lessThan(_: void, a: []const u8, b: []const u8) bool {
+                if (isBaseEnvFile(a) and !isBaseEnvFile(b)) return true;
+                if (!isBaseEnvFile(a) and isBaseEnvFile(b)) return false;
+                return std.mem.lessThan(u8, a, b);
+            }
+        }.lessThan);
+
+        // Parse each file
+        for (files.items) |filename| {
+            try store.addFile(filename);
+            // Build full path
+            var path_buf: [4096]u8 = undefined;
+            const full_path = std.fmt.bufPrint(&path_buf, "{s}/{s}", .{ path, filename }) catch continue;
+            parseEnvFileAtPath(allocator, full_path, filename, &store) catch |err| {
+                if (err != error.FileNotFound) return err;
+            };
+        }
+    } else {
+        // It's a file - parse it directly
+        const basename = std.fs.path.basename(path);
+        try store.addFile(basename);
+        parseEnvFileAtPath(allocator, path, basename, &store) catch |err| {
+            if (err != error.FileNotFound) return err;
+        };
+    }
+
+    return store;
+}
+
+/// Parse env file at an absolute/relative path into MultiEnvStore
+fn parseEnvFileAtPath(allocator: std.mem.Allocator, path: []const u8, display_name: []const u8, store: *MultiEnvStore) ParseError!void {
+    const file = std.fs.cwd().openFile(path, .{}) catch |err| {
+        return switch (err) {
+            error.FileNotFound => error.FileNotFound,
+            error.AccessDenied => error.AccessDenied,
+            error.IsDir => error.IsDir,
+            else => error.Unexpected,
+        };
+    };
+    defer file.close();
+
+    const content = file.readToEndAlloc(allocator, 1024 * 1024) catch |err| {
+        return switch (err) {
+            error.OutOfMemory => error.OutOfMemory,
+            else => error.Unexpected,
+        };
+    };
+    defer allocator.free(content);
+
+    try parseEnvContentMulti(content, display_name, store);
 }
 
 /// Parse env file into MultiEnvStore
