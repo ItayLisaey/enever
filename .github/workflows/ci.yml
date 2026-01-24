@@ -24,11 +24,8 @@ jobs:
         with:
           version: 0.14.0
 
-      - name: Run tests
-        run: zig build test
-
-      - name: Run integration tests
-        run: zig build test-integration
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
 
       - name: Build
         run: zig build -Doptimize=ReleaseSafe
@@ -36,6 +33,12 @@ jobs:
       - name: Verify binary
         run: ./zig-out/bin/enever --version
         shell: bash
+
+      - name: Install test dependencies
+        run: bun install
+
+      - name: Run tests
+        run: bun test
 
   lint:
     name: Lint
