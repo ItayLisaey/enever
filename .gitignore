@@ -19,5 +19,8 @@ zig-out/
 *.so
 *.dylib
 
+# Built binary (keep bin/enever.js for npm)
+bin/enever
+
 # Node.js
 node_modules/

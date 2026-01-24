@@ -24,7 +24,8 @@
   },
   "scripts": {
     "postinstall": "node scripts/postinstall.js",
-    "test": "bun test"
+    "build": "zig build -Doptimize=ReleaseSafe",
+    "test": "zig build && bun test"
   },
   "devDependencies": {
     "@types/bun": "latest"

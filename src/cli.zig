@@ -245,8 +245,15 @@ fn executeRead(allocator: std.mem.Allocator, opts: *Options) !u8 {
     var is_key_lookup = false;
 
     if (target) |t| {
-        // Check if it's a file path
-        if (std.mem.endsWith(u8, t, ".env") or std.mem.indexOf(u8, t, "/") != null or std.mem.indexOf(u8, t, ".env.") != null) {
+        // First, check if it's an actual file or directory path
+        const stat_result = std.fs.cwd().statFile(t);
+        const is_path = if (stat_result) |stat|
+            stat.kind == .file or stat.kind == .directory
+        else |_|
+            // Path doesn't exist - check for path-like patterns (starts with . or contains /)
+            std.mem.startsWith(u8, t, ".") or std.mem.indexOfScalar(u8, t, '/') != null;
+
+        if (is_path) {
             // It's a path - load from that location
             store = env_parser.loadEnvFilesFromPath(allocator, t) catch |err| {
                 printErr("Error loading env files from {s}: {}\n", .{ t, err });
@@ -326,8 +333,15 @@ fn executeWrite(allocator: std.mem.Allocator, opts: *Options) !u8 {
         // Use provided KEY=VALUE args
         try key_values_to_write.appendSlice(allocator, opts.key_values.items);
     } else {
-        // Read from stdin
+        // Read from stdin - but first check if stdin is a TTY
         const stdin = getStdIn();
+        if (stdin.isTty()) {
+            printErr("Error: write command requires KEY=VALUE arguments\n", .{});
+            printErr("Usage: enever write KEY=value [KEY2=value2 ...]\n", .{});
+            printErr("       echo 'KEY=value' | enever write\n", .{});
+            return ExitCode.general_error;
+        }
+
         const stdin_content = stdin.readToEndAlloc(allocator, 1024 * 1024) catch |err| {
             printErr("Error reading from stdin: {}\n", .{err});
             return ExitCode.general_error;

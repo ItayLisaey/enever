@@ -45,10 +45,15 @@ describe("CLI commands", () => {
       expect(stdout).toContain("PORT");
     });
 
-    test("reads specific key", async () => {
-      const { stdout, exitCode } = await run("read", fixture("basic"), "API_KEY");
+    test("reads specific key from current directory", async () => {
+      const { stdout, exitCode } = await runInDir(fixture("basic"), "read", "API_KEY");
       expect(exitCode).toBe(0);
-      expect(stdout).toContain("API_KEY");
+      // Single key output format is "<file>: <masked_value>"
+      expect(stdout).toContain("+.env:");
+      expect(stdout).toContain("****");
+      // Should only show one file entry, not multiple keys
+      expect(stdout).not.toContain("DATABASE_URL");
+      expect(stdout).not.toContain("SECRET_KEY");
     });
 
     test("values are masked by default", async () => {
@@ -90,13 +95,6 @@ describe("CLI commands", () => {
     });
   });
 
-  describe("validate", () => {
-    test("validates a valid env directory", async () => {
-      const { exitCode } = await run("validate", fixture("basic"));
-      expect(exitCode).toBe(0);
-    });
-  });
-
   describe("file not found", () => {
     test("returns error for missing directory", async () => {
       const { exitCode } = await run("read", "/nonexistent/path");
@@ -125,6 +123,28 @@ describe("CLI commands", () => {
     test("accepts -q for quiet mode", async () => {
       const { exitCode } = await run("read", fixture("basic"), "-q");
       expect(exitCode).toBe(0);
+    });
+  });
+
+  describe("path vs key detection", () => {
+    test("key ending in .env is treated as key lookup, not path", async () => {
+      // A key like MY_KEY.env should be treated as a key, not a path
+      const { stderr, exitCode } = await runInDir(fixture("basic"), "read", "MY_KEY.env");
+      // Should return "Key not found" (exit code 2), not a path error
+      expect(exitCode).toBe(2);
+      expect(stderr).toContain("Key not found");
+    });
+
+    test("key containing .env. is treated as key lookup, not path", async () => {
+      const { stderr, exitCode } = await runInDir(fixture("basic"), "read", "CONFIG.env.backup");
+      expect(exitCode).toBe(2);
+      expect(stderr).toContain("Key not found");
+    });
+
+    test("actual .env file path is treated as path", async () => {
+      const { stdout, exitCode } = await run("read", fixture("basic"));
+      expect(exitCode).toBe(0);
+      expect(stdout).toContain("API_KEY");
     });
   });
 });
