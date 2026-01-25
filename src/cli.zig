@@ -240,6 +240,13 @@ fn executeRead(allocator: std.mem.Allocator, opts: *Options) !u8 {
     // Determine what to read: path to file/directory, or key name
     const target = opts.key; // Could be path or key
 
+    // DEBUG: Print target
+    if (target) |t| {
+        printErr("DEBUG: target = '{s}'\n", .{t});
+    } else {
+        printErr("DEBUG: target = null\n", .{});
+    }
+
     // Check if target is a path (file or directory)
     var store: env_parser.MultiEnvStore = undefined;
     var is_key_lookup = false;
@@ -286,28 +293,38 @@ fn executeRead(allocator: std.mem.Allocator, opts: *Options) !u8 {
                 std.mem.indexOfScalar(u8, t, '\\') != null;
         };
 
+        printErr("DEBUG: is_path = {}\n", .{is_path});
+
         if (is_path) {
             // It's a path - load from that location
+            printErr("DEBUG: loading from path '{s}'\n", .{t});
             store = env_parser.loadEnvFilesFromPath(allocator, t) catch |err| {
                 printErr("Error loading env files from {s}: {}\n", .{ t, err });
                 return ExitCode.general_error;
             };
+            printErr("DEBUG: loaded from path, store.count() = {}\n", .{store.count()});
         } else {
             // It's a key name - load from current directory and look up key
+            printErr("DEBUG: loading from cwd for key lookup\n", .{});
             store = env_parser.loadAllEnvFiles(allocator) catch |err| {
                 printErr("Error loading env files: {}\n", .{err});
                 return ExitCode.general_error;
             };
+            printErr("DEBUG: loaded from cwd, store.count() = {}\n", .{store.count()});
             is_key_lookup = true;
         }
     } else {
         // No argument - load from current directory
+        printErr("DEBUG: no target, loading from cwd\n", .{});
         store = env_parser.loadAllEnvFiles(allocator) catch |err| {
             printErr("Error loading env files: {}\n", .{err});
             return ExitCode.general_error;
         };
+        printErr("DEBUG: loaded from cwd (no target), store.count() = {}\n", .{store.count()});
     }
     defer store.deinit();
+
+    printErr("DEBUG: is_key_lookup = {}\n", .{is_key_lookup});
 
     const stdout = getStdOut();
 
