@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2025-01-25
+
 ### Changed
 
 - Renamed `get` command to `read` for clarity
@@ -57,6 +59,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Pre-built binaries for Linux (x64, arm64), macOS (x64, arm64), Windows (x64)
   - SHA256 checksums for all releases
 
-[Unreleased]: https://github.com/itaylisaey/enever/compare/v0.2.1...HEAD
+[Unreleased]: https://github.com/itaylisaey/enever/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/itaylisaey/enever/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/itaylisaey/enever/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/itaylisaey/enever/releases/tag/v0.2.0

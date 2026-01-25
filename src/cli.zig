@@ -3,7 +3,7 @@ const env_parser = @import("env-parser.zig");
 const masking = @import("masking.zig");
 const output = @import("output.zig");
 
-pub const version = "0.2.1";
+pub const version = "0.3.0";
 
 fn getStdOut() std.fs.File {
     return std.fs.File.stdout();
