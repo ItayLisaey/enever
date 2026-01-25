@@ -248,18 +248,36 @@ fn executeRead(allocator: std.mem.Allocator, opts: *Options) !u8 {
         // First, check if it's an actual file or directory path
         // Try to open as directory first (works cross-platform including Windows)
         const is_path = blk: {
+            // Check if path is absolute (handles both Unix and Windows paths)
+            const is_absolute = std.fs.path.isAbsolute(t);
+
             // Try opening as directory
-            if (std.fs.cwd().openDir(t, .{})) |dir| {
-                var d = dir;
-                d.close();
-                break :blk true;
-            } else |_| {}
+            if (is_absolute) {
+                if (std.fs.openDirAbsolute(t, .{})) |dir| {
+                    var d = dir;
+                    d.close();
+                    break :blk true;
+                } else |_| {}
+            } else {
+                if (std.fs.cwd().openDir(t, .{})) |dir| {
+                    var d = dir;
+                    d.close();
+                    break :blk true;
+                } else |_| {}
+            }
 
             // Try opening as file
-            if (std.fs.cwd().openFile(t, .{})) |file| {
-                file.close();
-                break :blk true;
-            } else |_| {}
+            if (is_absolute) {
+                if (std.fs.openFileAbsolute(t, .{})) |file| {
+                    file.close();
+                    break :blk true;
+                } else |_| {}
+            } else {
+                if (std.fs.cwd().openFile(t, .{})) |file| {
+                    file.close();
+                    break :blk true;
+                } else |_| {}
+            }
 
             // Path doesn't exist - check for path-like patterns (starts with . or contains path separator)
             // Check for both forward slash (Unix) and backslash (Windows)
