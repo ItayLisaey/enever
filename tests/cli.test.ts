@@ -176,5 +176,29 @@ describe("CLI commands", () => {
       );
       expect(exitCode).toBe(0);
     });
+
+    test("path with forward slash is detected as path, not key", async () => {
+      // Non-existent path with forward slash should be treated as path (error), not key lookup
+      const { stderr, exitCode } = await run("read", "/nonexistent/path/to/dir");
+      // Should get a path error (exit code 1), not "key not found" (exit code 2)
+      expect(exitCode).toBe(1);
+      expect(stderr).toContain("Error");
+    });
+
+    test("path with backslash is detected as path, not key", async () => {
+      // Non-existent path with backslash should be treated as path (error), not key lookup
+      // This is critical for Windows path handling
+      const { stderr, exitCode } = await run("read", "C:\\nonexistent\\path\\to\\dir");
+      // Should get a path error (exit code 1), not "key not found" (exit code 2)
+      expect(exitCode).toBe(1);
+      expect(stderr).toContain("Error");
+    });
+
+    test("path starting with dot is detected as path, not key", async () => {
+      // Paths starting with . should be treated as paths
+      const { stderr, exitCode } = await run("read", "./nonexistent/path");
+      expect(exitCode).toBe(1);
+      expect(stderr).toContain("Error");
+    });
   });
 });

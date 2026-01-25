@@ -250,8 +250,11 @@ fn executeRead(allocator: std.mem.Allocator, opts: *Options) !u8 {
         const is_path = if (stat_result) |stat|
             stat.kind == .file or stat.kind == .directory
         else |_|
-            // Path doesn't exist - check for path-like patterns (starts with . or contains /)
-            std.mem.startsWith(u8, t, ".") or std.mem.indexOfScalar(u8, t, '/') != null;
+            // Path doesn't exist - check for path-like patterns (starts with . or contains path separator)
+            // Check for both forward slash (Unix) and backslash (Windows)
+            std.mem.startsWith(u8, t, ".") or
+                std.mem.indexOfScalar(u8, t, '/') != null or
+                std.mem.indexOfScalar(u8, t, '\\') != null;
 
         if (is_path) {
             // It's a path - load from that location
