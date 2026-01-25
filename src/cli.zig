@@ -246,15 +246,27 @@ fn executeRead(allocator: std.mem.Allocator, opts: *Options) !u8 {
 
     if (target) |t| {
         // First, check if it's an actual file or directory path
-        const stat_result = std.fs.cwd().statFile(t);
-        const is_path = if (stat_result) |stat|
-            stat.kind == .file or stat.kind == .directory
-        else |_|
+        // Try to open as directory first (works cross-platform including Windows)
+        const is_path = blk: {
+            // Try opening as directory
+            if (std.fs.cwd().openDir(t, .{})) |dir| {
+                var d = dir;
+                d.close();
+                break :blk true;
+            } else |_| {}
+
+            // Try opening as file
+            if (std.fs.cwd().openFile(t, .{})) |file| {
+                file.close();
+                break :blk true;
+            } else |_| {}
+
             // Path doesn't exist - check for path-like patterns (starts with . or contains path separator)
             // Check for both forward slash (Unix) and backslash (Windows)
-            std.mem.startsWith(u8, t, ".") or
+            break :blk std.mem.startsWith(u8, t, ".") or
                 std.mem.indexOfScalar(u8, t, '/') != null or
                 std.mem.indexOfScalar(u8, t, '\\') != null;
+        };
 
         if (is_path) {
             // It's a path - load from that location

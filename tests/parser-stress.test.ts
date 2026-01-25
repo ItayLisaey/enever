@@ -326,18 +326,18 @@ describe("Parser Stress Tests", () => {
   // ================================================================
   describe("File Format Edge Cases", () => {
     test("file with UTF-8 BOM", async () => {
-      const { stdout, exitCode } = await run("read", STRESS_FIXTURES + "/+.env.bom", "BOM_KEY", "-u", "BOM_KEY");
+      const { stdout, exitCode } = await run("read", join(STRESS_FIXTURES, "+.env.bom"), "BOM_KEY", "-u", "BOM_KEY");
       // Parser behavior with BOM prefix
     });
 
     test("file with CRLF line endings", async () => {
-      const { stdout, exitCode } = await run("read", STRESS_FIXTURES + "/+.env.crlf", "CRLF_KEY1", "-u", "CRLF_KEY1");
+      const { stdout, exitCode } = await run("read", join(STRESS_FIXTURES, "+.env.crlf"), "CRLF_KEY1", "-u", "CRLF_KEY1");
       expect(exitCode).toBe(0);
       expect(stdout).toContain("value1");
     });
 
     test("mixed LF and CRLF in same file", async () => {
-      const { stdout, exitCode } = await run("read", STRESS_FIXTURES + "/+.env.crlf", "MIXED_LF", "-u", "MIXED_LF");
+      const { stdout, exitCode } = await run("read", join(STRESS_FIXTURES, "+.env.crlf"), "MIXED_LF", "-u", "MIXED_LF");
       expect(exitCode).toBe(0);
       expect(stdout).toContain("value3");
     });
