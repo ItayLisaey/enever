@@ -35,7 +35,7 @@ jobs:
         shell: bash
 
       - name: Install test dependencies
-        run: bun install
+        run: bun install --ignore-scripts
 
       - name: Run tests
         run: bun test
