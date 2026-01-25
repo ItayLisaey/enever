@@ -147,4 +147,34 @@ describe("CLI commands", () => {
       expect(stdout).toContain("API_KEY");
     });
   });
+
+  describe("cross-platform path handling", () => {
+    test("reads specific key from directory path with native separators", async () => {
+      // This test verifies that paths with platform-native separators work correctly
+      // On Windows, fixture() returns paths with backslashes (D:\a\...\fixtures\basic)
+      // On Unix, it returns paths with forward slashes (/home/.../fixtures/basic)
+      const { stdout, exitCode } = await run("read", fixture("basic"), "API_KEY", "-u", "API_KEY");
+      expect(exitCode).toBe(0);
+      expect(stdout).toContain("sk-1234567890abcdef");
+    });
+
+    test("reads all keys from nested directory path", async () => {
+      // Test that directory iteration works with platform-native path separators
+      const { stdout, exitCode } = await run("read", fixture("basic"));
+      expect(exitCode).toBe(0);
+      expect(stdout).toContain("API_KEY");
+      expect(stdout).toContain("DATABASE_URL");
+      expect(stdout).toContain("PORT");
+    });
+
+    test("diff command works with platform-native paths", async () => {
+      // Ensure diff command handles paths correctly across platforms
+      const { exitCode } = await run(
+        "diff",
+        fixture("overrides/+.env"),
+        fixture("overrides/+.env.development")
+      );
+      expect(exitCode).toBe(0);
+    });
+  });
 });
