@@ -530,9 +530,9 @@ pub fn loadEnvFilesFromPath(allocator: std.mem.Allocator, path: []const u8) !Mul
         // Parse each file
         for (files.items) |filename| {
             try store.addFile(filename);
-            // Build full path
-            var path_buf: [4096]u8 = undefined;
-            const full_path = std.fmt.bufPrint(&path_buf, "{s}/{s}", .{ path, filename }) catch continue;
+            // Build full path using platform-appropriate separator
+            const full_path = std.fs.path.join(allocator, &.{ path, filename }) catch continue;
+            defer allocator.free(full_path);
             parseEnvFileAtPath(allocator, full_path, filename, &store) catch |err| {
                 if (err != error.FileNotFound) return err;
             };
