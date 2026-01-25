@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Renamed `get` command to `read` for clarity
+- Renamed `set` command to `write` for clarity
+
+### Added
+
+- `delete` command to remove keys from env files
+- `diff` command to compare two .env files
+- `--force` flag for write command to overwrite existing keys
+- `-f, --file` flag for write/delete to target specific files
+- Exit code 3 for key already exists (write without --force)
+
 ## [0.2.1] - 2025-01-23
 
 ### Fixed

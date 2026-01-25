@@ -29,13 +29,36 @@ All values are masked by default. AI sees `****t123`, not your actual secrets.
 | `enever read` | Read all variables (masked) |
 | `enever read KEY` | Read specific variable |
 | `enever read ./path` | Read from another directory |
-| `enever write KEY=value` | Write to .env.local |
-| `enever write --file .env.prod KEY=val` | Write to specific file |
-| `enever delete KEY` | Delete from .env.local |
-| `enever diff .env .env.prod` | Compare two files |
-| `enever list` | List keys only (no values) |
 | `enever read -u KEY` | Unmask a specific key |
 | `enever read --json` | JSON output |
+| `enever write KEY=value` | Write to .env.local |
+| `enever write -f .env.prod KEY=val` | Write to specific file |
+| `enever write --force KEY=val` | Overwrite existing keys |
+| `enever delete KEY` | Delete from .env.local |
+| `enever delete -f .env.prod KEY` | Delete from specific file |
+| `enever diff .env .env.prod` | Compare two files |
+| `enever list` | List keys only (no values) |
+
+### Options
+
+| Flag | Description |
+|------|-------------|
+| `-u, --unmask <key>` | Show raw value of a key |
+| `-f, --file <path>` | Target file for write/delete (default: .env.local) |
+| `--force` | Overwrite existing keys (write command) |
+| `--json` | Output in JSON format |
+| `-q, --quiet` | Suppress non-essential output |
+| `-h, --help` | Show help |
+| `-v, --version` | Show version |
+
+### Exit Codes
+
+| Code | Meaning |
+|------|---------|
+| 0 | Success |
+| 1 | General error |
+| 2 | Key not found |
+| 3 | Key exists (write without --force) |
 
 ## Setup for AI Protection
 
@@ -62,8 +85,22 @@ Use `enever` for all .env operations. Values are masked by default.
 - `enever list` - List all keys (no values)
 - `enever read` - Read all variables (masked)
 - `enever read KEY` - Read specific variable
+- `enever read -u KEY` - Read unmasked value
+- `enever read ./path` - Read from another directory
 - `enever write KEY=value` - Write to .env.local
+- `enever write -f FILE KEY=value` - Write to specific file
+- `enever write --force KEY=value` - Overwrite existing keys
 - `enever delete KEY` - Delete from .env.local
+- `enever delete -f FILE KEY` - Delete from specific file
+- `enever diff .env .env.prod` - Compare two files
+
+## Options
+
+- `-u, --unmask KEY` - Show raw value
+- `-f, --file PATH` - Target file for write/delete
+- `--force` - Overwrite existing keys
+- `--json` - JSON output
+- `-q, --quiet` - Suppress output
 
 ## Rules
 
@@ -81,11 +118,23 @@ Create `AGENTS.md` in project root:
 
 ## Environment Variables
 
-Use `enever` for all .env operations. Do not read .env files directly.
+Use `enever` CLI for all .env operations. Do not read .env files directly.
+
+### Commands
 
 - `enever list` - see available keys
 - `enever read` - see masked values
-- `enever write KEY=value` - modify .env.local
+- `enever read KEY` - read specific key
+- `enever write KEY=value` - write to .env.local
+- `enever write -f .env.prod KEY=value` - write to specific file
+- `enever delete KEY` - delete from .env.local
+- `enever diff .env .env.prod` - compare files
+
+### Rules
+
+1. NEVER read .env files directly with cat/grep/head
+2. ALWAYS use enever commands for env operations
+3. Values are masked by default for security
 ```
 
 ### 3. Block Direct Access (Claude Code)
