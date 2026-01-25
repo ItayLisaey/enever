@@ -210,14 +210,27 @@ pub const ParseError = error{
 };
 
 pub fn parseEnvFile(allocator: std.mem.Allocator, path: []const u8, store: *EnvStore) ParseError!void {
-    const file = std.fs.cwd().openFile(path, .{}) catch |err| {
-        return switch (err) {
-            error.FileNotFound => error.FileNotFound,
-            error.AccessDenied => error.AccessDenied,
-            error.IsDir => error.IsDir,
-            else => error.Unexpected,
+    // Check if path is absolute (handles both Unix and Windows paths)
+    const is_absolute = std.fs.path.isAbsolute(path);
+
+    const file = if (is_absolute)
+        std.fs.openFileAbsolute(path, .{}) catch |err| {
+            return switch (err) {
+                error.FileNotFound => error.FileNotFound,
+                error.AccessDenied => error.AccessDenied,
+                error.IsDir => error.IsDir,
+                else => error.Unexpected,
+            };
+        }
+    else
+        std.fs.cwd().openFile(path, .{}) catch |err| {
+            return switch (err) {
+                error.FileNotFound => error.FileNotFound,
+                error.AccessDenied => error.AccessDenied,
+                error.IsDir => error.IsDir,
+                else => error.Unexpected,
+            };
         };
-    };
     defer file.close();
 
     const content = file.readToEndAlloc(allocator, 1024 * 1024) catch |err| {
@@ -484,23 +497,56 @@ pub fn loadEnvFilesFromPath(allocator: std.mem.Allocator, path: []const u8) !Mul
     var store = MultiEnvStore.init(allocator);
     errdefer store.deinit();
 
-    // Check if path is a file or directory
-    const stat = std.fs.cwd().statFile(path) catch |err| {
-        return switch (err) {
-            error.FileNotFound => error.FileNotFound,
-            error.AccessDenied => error.AccessDenied,
-            else => error.Unexpected,
-        };
+    // Check if path is absolute (handles both Unix and Windows paths like D:\...)
+    const is_absolute = std.fs.path.isAbsolute(path);
+
+    // Determine if path is a file or directory by trying to open as directory first
+    const is_directory = blk: {
+        if (is_absolute) {
+            if (std.fs.openDirAbsolute(path, .{})) |d| {
+                var dir = d;
+                dir.close();
+                break :blk true;
+            } else |_| {}
+        } else {
+            if (std.fs.cwd().openDir(path, .{})) |d| {
+                var dir = d;
+                dir.close();
+                break :blk true;
+            } else |_| {}
+        }
+        // Not a directory - check if it's a file
+        if (is_absolute) {
+            if (std.fs.openFileAbsolute(path, .{})) |f| {
+                f.close();
+                break :blk false;
+            } else |_| {}
+        } else {
+            if (std.fs.cwd().openFile(path, .{})) |f| {
+                f.close();
+                break :blk false;
+            } else |_| {}
+        }
+        // Neither file nor directory found
+        return error.FileNotFound;
     };
 
-    if (stat.kind == .directory) {
+    if (is_directory) {
         // It's a directory - discover .env* files in it
-        var dir = std.fs.cwd().openDir(path, .{ .iterate = true }) catch |err| {
-            return switch (err) {
-                error.AccessDenied => error.AccessDenied,
-                else => error.Unexpected,
+        var dir = if (is_absolute)
+            std.fs.openDirAbsolute(path, .{ .iterate = true }) catch |err| {
+                return switch (err) {
+                    error.AccessDenied => error.AccessDenied,
+                    else => error.Unexpected,
+                };
+            }
+        else
+            std.fs.cwd().openDir(path, .{ .iterate = true }) catch |err| {
+                return switch (err) {
+                    error.AccessDenied => error.AccessDenied,
+                    else => error.Unexpected,
+                };
             };
-        };
         defer dir.close();
 
         var files: std.ArrayListUnmanaged([]const u8) = .{};
@@ -551,14 +597,27 @@ pub fn loadEnvFilesFromPath(allocator: std.mem.Allocator, path: []const u8) !Mul
 
 /// Parse env file at an absolute/relative path into MultiEnvStore
 fn parseEnvFileAtPath(allocator: std.mem.Allocator, path: []const u8, display_name: []const u8, store: *MultiEnvStore) ParseError!void {
-    const file = std.fs.cwd().openFile(path, .{}) catch |err| {
-        return switch (err) {
-            error.FileNotFound => error.FileNotFound,
-            error.AccessDenied => error.AccessDenied,
-            error.IsDir => error.IsDir,
-            else => error.Unexpected,
+    // Check if path is absolute (handles both Unix and Windows paths)
+    const is_absolute = std.fs.path.isAbsolute(path);
+
+    const file = if (is_absolute)
+        std.fs.openFileAbsolute(path, .{}) catch |err| {
+            return switch (err) {
+                error.FileNotFound => error.FileNotFound,
+                error.AccessDenied => error.AccessDenied,
+                error.IsDir => error.IsDir,
+                else => error.Unexpected,
+            };
+        }
+    else
+        std.fs.cwd().openFile(path, .{}) catch |err| {
+            return switch (err) {
+                error.FileNotFound => error.FileNotFound,
+                error.AccessDenied => error.AccessDenied,
+                error.IsDir => error.IsDir,
+                else => error.Unexpected,
+            };
         };
-    };
     defer file.close();
 
     const content = file.readToEndAlloc(allocator, 1024 * 1024) catch |err| {
@@ -574,14 +633,27 @@ fn parseEnvFileAtPath(allocator: std.mem.Allocator, path: []const u8, display_na
 
 /// Parse env file into MultiEnvStore
 pub fn parseEnvFileMulti(allocator: std.mem.Allocator, path: []const u8, store: *MultiEnvStore) ParseError!void {
-    const file = std.fs.cwd().openFile(path, .{}) catch |err| {
-        return switch (err) {
-            error.FileNotFound => error.FileNotFound,
-            error.AccessDenied => error.AccessDenied,
-            error.IsDir => error.IsDir,
-            else => error.Unexpected,
+    // Check if path is absolute (handles both Unix and Windows paths)
+    const is_absolute = std.fs.path.isAbsolute(path);
+
+    const file = if (is_absolute)
+        std.fs.openFileAbsolute(path, .{}) catch |err| {
+            return switch (err) {
+                error.FileNotFound => error.FileNotFound,
+                error.AccessDenied => error.AccessDenied,
+                error.IsDir => error.IsDir,
+                else => error.Unexpected,
+            };
+        }
+    else
+        std.fs.cwd().openFile(path, .{}) catch |err| {
+            return switch (err) {
+                error.FileNotFound => error.FileNotFound,
+                error.AccessDenied => error.AccessDenied,
+                error.IsDir => error.IsDir,
+                else => error.Unexpected,
+            };
         };
-    };
     defer file.close();
 
     const content = file.readToEndAlloc(allocator, 1024 * 1024) catch |err| {
