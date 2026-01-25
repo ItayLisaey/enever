@@ -1,6 +1,9 @@
-# Environment files
+# Environment files (real secrets)
 .env
-+.env.*
+.env.*
+
+# Test fixtures use +.env prefix and should be tracked
+!tests/fixtures/**/+.env*
 
 # AI and agent-related files
 .context/
@@ -15,3 +18,9 @@ zig-out/
 *.a
 *.so
 *.dylib
+
+# Built binary (keep bin/enever.js for npm)
+bin/enever
+
+# Node.js
+node_modules/

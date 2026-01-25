@@ -23,7 +23,12 @@
     "enever": "bin/enever.js"
   },
   "scripts": {
-    "postinstall": "node scripts/postinstall.js"
+    "postinstall": "node scripts/postinstall.js",
+    "build": "zig build -Doptimize=ReleaseSafe",
+    "test": "zig build && bun test"
+  },
+  "devDependencies": {
+    "@types/bun": "latest"
   },
   "engines": {
     "node": ">=14"
