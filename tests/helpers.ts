@@ -21,11 +21,6 @@ export async function run(...args: string[]): Promise<RunResult> {
   const stderr = await new Response(proc.stderr).text();
   const exitCode = await proc.exited;
 
-  // Debug: print stderr if exit code is unexpected (not 0 or 2)
-  if (exitCode !== 0 && exitCode !== 2 && stderr) {
-    console.log(`[DEBUG] run(${args.join(', ')}) stderr:`, stderr);
-  }
-
   return { stdout, stderr, exitCode };
 }
 
@@ -39,11 +34,6 @@ export async function runInDir(cwd: string, ...args: string[]): Promise<RunResul
   const stdout = await new Response(proc.stdout).text();
   const stderr = await new Response(proc.stderr).text();
   const exitCode = await proc.exited;
-
-  // Debug: print stderr if exit code is unexpected (not 0 or 2)
-  if (exitCode !== 0 && exitCode !== 2 && stderr) {
-    console.log(`[DEBUG] runInDir(${cwd}, ${args.join(', ')}) stderr:`, stderr);
-  }
 
   return { stdout, stderr, exitCode };
 }

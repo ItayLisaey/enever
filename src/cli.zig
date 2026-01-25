@@ -65,10 +65,24 @@ pub const Options = struct {
     }
 
     pub fn deinit(self: *Options) void {
+        // Free duplicated strings
+        for (self.unmask_keys.items) |s| self.allocator.free(s);
         self.unmask_keys.deinit(self.allocator);
+
+        for (self.paths.items) |s| self.allocator.free(s);
         self.paths.deinit(self.allocator);
+
+        for (self.key_values.items) |kv| {
+            self.allocator.free(kv.key);
+            self.allocator.free(kv.value);
+        }
         self.key_values.deinit(self.allocator);
+
+        for (self.keys.items) |s| self.allocator.free(s);
         self.keys.deinit(self.allocator);
+
+        if (self.key) |k| self.allocator.free(k);
+        if (self.file_path) |fp| self.allocator.free(fp);
     }
 };
 
@@ -131,7 +145,8 @@ pub fn parseArgsFromSlice(allocator: std.mem.Allocator, test_args: ?[]const []co
             if (std.mem.eql(u8, arg, "-u") or std.mem.eql(u8, arg, "--unmask")) {
                 i += 1;
                 if (i >= arg_list.items.len) return error.MissingUnmaskKey;
-                try opts.unmask_keys.append(allocator, arg_list.items[i]);
+                const duped = try allocator.dupe(u8, arg_list.items[i]);
+                try opts.unmask_keys.append(allocator, duped);
             } else if (std.mem.eql(u8, arg, "--json")) {
                 opts.json_format = true;
             } else if (std.mem.eql(u8, arg, "-q") or std.mem.eql(u8, arg, "--quiet")) {
@@ -145,7 +160,7 @@ pub fn parseArgsFromSlice(allocator: std.mem.Allocator, test_args: ?[]const []co
             } else if (std.mem.eql(u8, arg, "--file") or std.mem.eql(u8, arg, "-f")) {
                 i += 1;
                 if (i >= arg_list.items.len) return error.MissingFileArg;
-                opts.file_path = arg_list.items[i];
+                opts.file_path = try allocator.dupe(u8, arg_list.items[i]);
             } else if (std.mem.eql(u8, arg, "--force")) {
                 opts.force = true;
             } else {
@@ -159,7 +174,7 @@ pub fn parseArgsFromSlice(allocator: std.mem.Allocator, test_args: ?[]const []co
                 if (i + 1 < arg_list.items.len) {
                     const next_arg = arg_list.items[i + 1];
                     if (!std.mem.startsWith(u8, next_arg, "-")) {
-                        opts.key = next_arg; // Could be path or key
+                        opts.key = try allocator.dupe(u8, next_arg); // Could be path or key
                         i += 1;
                     }
                 }
@@ -184,17 +199,19 @@ pub fn parseArgsFromSlice(allocator: std.mem.Allocator, test_args: ?[]const []co
                     .write => {
                         if (std.mem.indexOfScalar(u8, arg, '=')) |eq_pos| {
                             try opts.key_values.append(allocator, .{
-                                .key = arg[0..eq_pos],
-                                .value = arg[eq_pos + 1 ..],
+                                .key = try allocator.dupe(u8, arg[0..eq_pos]),
+                                .value = try allocator.dupe(u8, arg[eq_pos + 1 ..]),
                             });
                         }
                     },
                     .delete => {
-                        try opts.keys.append(allocator, arg);
+                        const duped = try allocator.dupe(u8, arg);
+                        try opts.keys.append(allocator, duped);
                     },
                     .diff => {
                         if (opts.paths.items.len < 2) {
-                            try opts.paths.append(allocator, arg);
+                            const duped = try allocator.dupe(u8, arg);
+                            try opts.paths.append(allocator, duped);
                         }
                     },
                     else => {},
@@ -239,13 +256,6 @@ pub fn run(allocator: std.mem.Allocator) !u8 {
 fn executeRead(allocator: std.mem.Allocator, opts: *Options) !u8 {
     // Determine what to read: path to file/directory, or key name
     const target = opts.key; // Could be path or key
-
-    // DEBUG: Print target
-    if (target) |t| {
-        printErr("DEBUG: target = '{s}'\n", .{t});
-    } else {
-        printErr("DEBUG: target = null\n", .{});
-    }
 
     // Check if target is a path (file or directory)
     var store: env_parser.MultiEnvStore = undefined;
@@ -293,38 +303,28 @@ fn executeRead(allocator: std.mem.Allocator, opts: *Options) !u8 {
                 std.mem.indexOfScalar(u8, t, '\\') != null;
         };
 
-        printErr("DEBUG: is_path = {}\n", .{is_path});
-
         if (is_path) {
             // It's a path - load from that location
-            printErr("DEBUG: loading from path '{s}'\n", .{t});
             store = env_parser.loadEnvFilesFromPath(allocator, t) catch |err| {
                 printErr("Error loading env files from {s}: {}\n", .{ t, err });
                 return ExitCode.general_error;
             };
-            printErr("DEBUG: loaded from path, store.count() = {}\n", .{store.count()});
         } else {
             // It's a key name - load from current directory and look up key
-            printErr("DEBUG: loading from cwd for key lookup\n", .{});
             store = env_parser.loadAllEnvFiles(allocator) catch |err| {
                 printErr("Error loading env files: {}\n", .{err});
                 return ExitCode.general_error;
             };
-            printErr("DEBUG: loaded from cwd, store.count() = {}\n", .{store.count()});
             is_key_lookup = true;
         }
     } else {
         // No argument - load from current directory
-        printErr("DEBUG: no target, loading from cwd\n", .{});
         store = env_parser.loadAllEnvFiles(allocator) catch |err| {
             printErr("Error loading env files: {}\n", .{err});
             return ExitCode.general_error;
         };
-        printErr("DEBUG: loaded from cwd (no target), store.count() = {}\n", .{store.count()});
     }
     defer store.deinit();
-
-    printErr("DEBUG: is_key_lookup = {}\n", .{is_key_lookup});
 
     const stdout = getStdOut();
 
