@@ -22,7 +22,7 @@ jobs:
       - name: Setup Zig
         uses: mlugg/setup-zig@v1
         with:
-          version: 0.15.2
+          version: latest
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
@@ -50,7 +50,7 @@ jobs:
       - name: Setup Zig
         uses: mlugg/setup-zig@v1
         with:
-          version: 0.15.2
+          version: latest
 
       - name: Check formatting
         run: zig fmt --check src/
