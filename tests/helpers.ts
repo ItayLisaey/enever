@@ -1,7 +1,8 @@
 import { join, dirname } from "path";
 
 // Binary must be built before running tests: `zig build` or `npm test`
-const BINARY_PATH = join(dirname(import.meta.dir), "zig-out/bin/enever");
+const binaryName = process.platform === "win32" ? "enever.exe" : "enever";
+const BINARY_PATH = join(dirname(import.meta.dir), "zig-out/bin", binaryName);
 
 export interface RunResult {
   stdout: string;
