@@ -7,6 +7,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-06-04
+
+Agent-capability release: every command is now scriptable and pipeable with
+machine-readable output and structured errors.
+
+### Added
+
+- `exec` (alias `run`) — run a command with the real env vars injected into its
+  environment (`enever exec -- npm run dev`). Values are passed to the child
+  process only and never printed; the child's exit code is propagated (`127`
+  command not found, `126` not executable).
+- `copy` (alias `cp`) — copy env vars from a source file/directory into a
+  destination `.env` file (`enever copy . .env.staging [KEY ...]`). Real values
+  are copied but never printed; existing destination keys are preserved unless
+  `--force`. Reports `copied`/`skipped`/`not_found` in `--json`.
+- `schema` command — machine-readable JSON describing every command, flag, and
+  exit code. The primary affordance for AI agents to self-discover the CLI.
+- `--json` is now honored by **every** command (`list`, `diff`, `write`,
+  `delete`, `version`), not just `read`. Each has a documented, stable shape.
+- Structured error envelopes on stderr in `--json` mode:
+  `{"error":{"code","message","hint"}}` with stable string error codes
+  (`USAGE`, `KEY_NOT_FOUND`, `KEY_EXISTS`, `FILE_NOT_FOUND`, `LOAD_FAILED`, …).
+- `-n, --dry-run` for `write` and `delete` — preview changes without modifying files.
+- `-y, --yes` as an alias for `--force`.
+- `--no-color` accepted as a documented no-op for agent/CI compatibility.
+- Exit code `64` (usage error) for invalid arguments, surfaced in `schema`.
+- `AGENTS.md` and an Agent Skill describing safe `enever` usage.
+
+### Changed
+
+- Migrated the codebase to **Zig 0.16** (`minimum_zig_version` is now `0.16.0`).
+  Adopts the new I/O model: `main(init: std.process.Init)`, `std.Io` threaded
+  through file/process operations, and `std.Io.Writer` for all output.
+
+### Fixed
+
+- Use-after-free crash when piping `KEY=value` lines to `write` via stdin
+  (the stdin buffer was freed before the parsed slices were consumed).
+
 ## [0.3.0] - 2025-01-25
 
 ### Changed
@@ -59,7 +98,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Pre-built binaries for Linux (x64, arm64), macOS (x64, arm64), Windows (x64)
   - SHA256 checksums for all releases
 
-[Unreleased]: https://github.com/itaylisaey/enever/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/itaylisaey/enever/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/itaylisaey/enever/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/itaylisaey/enever/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/itaylisaey/enever/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/itaylisaey/enever/releases/tag/v0.2.0
