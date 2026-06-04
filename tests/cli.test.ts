@@ -130,15 +130,15 @@ describe("CLI commands", () => {
     test("key ending in .env is treated as key lookup, not path", async () => {
       // A key like MY_KEY.env should be treated as a key, not a path
       const { stderr, exitCode } = await runInDir(fixture("basic"), "read", "MY_KEY.env");
-      // Should return "Key not found" (exit code 2), not a path error
+      // Should return "key not found" (exit code 2), not a path error
       expect(exitCode).toBe(2);
-      expect(stderr).toContain("Key not found");
+      expect(stderr).toMatch(/key not found/i);
     });
 
     test("key containing .env. is treated as key lookup, not path", async () => {
       const { stderr, exitCode } = await runInDir(fixture("basic"), "read", "CONFIG.env.backup");
       expect(exitCode).toBe(2);
-      expect(stderr).toContain("Key not found");
+      expect(stderr).toMatch(/key not found/i);
     });
 
     test("actual .env file path is treated as path", async () => {

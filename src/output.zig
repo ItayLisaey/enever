@@ -7,202 +7,6 @@ pub const OutputFormat = enum {
     json, // Standard JSON output
 };
 
-// File-based output functions for CLI
-pub fn writeStructuredOutputToFile(
-    file: std.fs.File,
-    store: *const env_parser.EnvStore,
-    unmask_keys: []const []const u8,
-) !void {
-    const count = store.count();
-
-    // Write header
-    var header_buf: [64]u8 = undefined;
-    const header = std.fmt.bufPrint(&header_buf, "envs[{d}]{{key,value,status}}:\n", .{count}) catch return error.OutOfMemory;
-    try file.writeAll(header);
-
-    // Collect entries for consistent ordering
-    var entries: std.ArrayListUnmanaged(env_parser.EnvEntry) = .{};
-    defer entries.deinit(store.allocator);
-
-    var it = store.iterator();
-    while (it.next()) |entry| {
-        try entries.append(store.allocator, entry.value_ptr.*);
-    }
-
-    // Sort by key for consistent output
-    std.mem.sort(env_parser.EnvEntry, entries.items, {}, struct {
-        fn lessThan(_: void, a: env_parser.EnvEntry, b: env_parser.EnvEntry) bool {
-            return std.mem.lessThan(u8, a.key, b.key);
-        }
-    }.lessThan);
-
-    // Write entries
-    var mask_buf: [64]u8 = undefined;
-    var line_buf: [1024]u8 = undefined;
-    for (entries.items) |entry| {
-        const should_unmask = for (unmask_keys) |uk| {
-            if (std.mem.eql(u8, uk, entry.key)) break true;
-        } else false;
-
-        const display_value = if (entry.mask_status == .masked and !should_unmask)
-            masking.maskValue(entry.value, &mask_buf)
-        else
-            entry.value;
-
-        const status_str = if (entry.mask_status == .masked and !should_unmask)
-            "masked"
-        else
-            "public";
-
-        const line = std.fmt.bufPrint(&line_buf, "  {s},{s},{s}\n", .{ entry.key, display_value, status_str }) catch continue;
-        try file.writeAll(line);
-    }
-}
-
-pub fn writeJsonOutputToFile(
-    file: std.fs.File,
-    store: *const env_parser.EnvStore,
-    unmask_keys: []const []const u8,
-) !void {
-    // Collect entries for consistent ordering
-    var entries: std.ArrayListUnmanaged(env_parser.EnvEntry) = .{};
-    defer entries.deinit(store.allocator);
-
-    var it = store.iterator();
-    while (it.next()) |entry| {
-        try entries.append(store.allocator, entry.value_ptr.*);
-    }
-
-    // Sort by key for consistent output
-    std.mem.sort(env_parser.EnvEntry, entries.items, {}, struct {
-        fn lessThan(_: void, a: env_parser.EnvEntry, b: env_parser.EnvEntry) bool {
-            return std.mem.lessThan(u8, a.key, b.key);
-        }
-    }.lessThan);
-
-    try file.writeAll("{\n  \"envs\": [\n");
-
-    var mask_buf: [64]u8 = undefined;
-    var line_buf: [2048]u8 = undefined;
-    for (entries.items, 0..) |entry, i| {
-        const should_unmask = for (unmask_keys) |uk| {
-            if (std.mem.eql(u8, uk, entry.key)) break true;
-        } else false;
-
-        const display_value = if (entry.mask_status == .masked and !should_unmask)
-            masking.maskValue(entry.value, &mask_buf)
-        else
-            entry.value;
-
-        const status_str = if (entry.mask_status == .masked and !should_unmask)
-            "masked"
-        else
-            "public";
-
-        // Escape value for JSON
-        var escaped_buf: [1024]u8 = undefined;
-        const escaped_value = escapeJsonString(display_value, &escaped_buf);
-
-        const comma = if (i < entries.items.len - 1) "," else "";
-        const line = std.fmt.bufPrint(&line_buf, "    {{\"key\": \"{s}\", \"value\": \"{s}\", \"status\": \"{s}\"}}{s}\n", .{ entry.key, escaped_value, status_str, comma }) catch continue;
-        try file.writeAll(line);
-    }
-
-    try file.writeAll("  ]\n}\n");
-}
-
-fn escapeJsonString(input: []const u8, buf: []u8) []const u8 {
-    var i: usize = 0;
-    for (input) |c| {
-        if (i + 2 >= buf.len) break;
-        switch (c) {
-            '"' => {
-                buf[i] = '\\';
-                buf[i + 1] = '"';
-                i += 2;
-            },
-            '\\' => {
-                buf[i] = '\\';
-                buf[i + 1] = '\\';
-                i += 2;
-            },
-            '\n' => {
-                buf[i] = '\\';
-                buf[i + 1] = 'n';
-                i += 2;
-            },
-            '\r' => {
-                buf[i] = '\\';
-                buf[i + 1] = 'r';
-                i += 2;
-            },
-            '\t' => {
-                buf[i] = '\\';
-                buf[i + 1] = 't';
-                i += 2;
-            },
-            else => {
-                buf[i] = c;
-                i += 1;
-            },
-        }
-    }
-    return buf[0..i];
-}
-
-pub fn writeListOutputToFile(file: std.fs.File, store: *const env_parser.EnvStore) !void {
-    // Collect keys for consistent ordering
-    var keys: std.ArrayListUnmanaged([]const u8) = .{};
-    defer keys.deinit(store.allocator);
-
-    var it = store.iterator();
-    while (it.next()) |entry| {
-        try keys.append(store.allocator, entry.value_ptr.key);
-    }
-
-    // Sort keys
-    std.mem.sort([]const u8, keys.items, {}, struct {
-        fn lessThan(_: void, a: []const u8, b: []const u8) bool {
-            return std.mem.lessThan(u8, a, b);
-        }
-    }.lessThan);
-
-    var buf: [512]u8 = undefined;
-    for (keys.items) |key| {
-        const line = std.fmt.bufPrint(&buf, "{s}\n", .{key}) catch continue;
-        try file.writeAll(line);
-    }
-}
-
-pub fn writeSingleValueToFile(
-    file: std.fs.File,
-    entry: env_parser.EnvEntry,
-    unmask: bool,
-    json_format: bool,
-) !void {
-    var mask_buf: [64]u8 = undefined;
-    const display_value = if (entry.mask_status == .masked and !unmask)
-        masking.maskValue(entry.value, &mask_buf)
-    else
-        entry.value;
-
-    const status_str = if (entry.mask_status == .masked and !unmask)
-        "masked"
-    else
-        "public";
-
-    var buf: [2048]u8 = undefined;
-    if (json_format) {
-        var escaped_buf: [1024]u8 = undefined;
-        const escaped_value = escapeJsonString(display_value, &escaped_buf);
-        const line = std.fmt.bufPrint(&buf, "{{\"key\": \"{s}\", \"value\": \"{s}\", \"status\": \"{s}\"}}\n", .{ entry.key, escaped_value, status_str }) catch return error.OutOfMemory;
-        try file.writeAll(line);
-    } else {
-        const line = std.fmt.bufPrint(&buf, "{s}={s} [{s}]\n", .{ entry.key, display_value, status_str }) catch return error.OutOfMemory;
-        try file.writeAll(line);
-    }
-}
-
 // Generic writer-based functions for tests
 pub fn writeStructuredOutput(
     writer: anytype,
@@ -215,7 +19,7 @@ pub fn writeStructuredOutput(
     try writer.print("envs[{d}]{{key,value,status}}:\n", .{count});
 
     // Collect entries for consistent ordering
-    var entries: std.ArrayListUnmanaged(env_parser.EnvEntry) = .{};
+    var entries: std.ArrayListUnmanaged(env_parser.EnvEntry) = .empty;
     defer entries.deinit(store.allocator);
 
     var it = store.iterator();
@@ -257,7 +61,7 @@ pub fn writeJsonOutput(
     unmask_keys: []const []const u8,
 ) !void {
     // Collect entries for consistent ordering
-    var entries: std.ArrayListUnmanaged(env_parser.EnvEntry) = .{};
+    var entries: std.ArrayListUnmanaged(env_parser.EnvEntry) = .empty;
     defer entries.deinit(store.allocator);
 
     var it = store.iterator();
@@ -322,7 +126,7 @@ fn writeJsonString(writer: anytype, key: []const u8, value: []const u8) !void {
 
 pub fn writeListOutput(writer: anytype, store: *const env_parser.EnvStore) !void {
     // Collect keys for consistent ordering
-    var keys: std.ArrayListUnmanaged([]const u8) = .{};
+    var keys: std.ArrayListUnmanaged([]const u8) = .empty;
     defer keys.deinit(store.allocator);
 
     var it = store.iterator();
@@ -460,7 +264,7 @@ pub fn writeMultiToonOutput(
     unmask_keys: []const []const u8,
 ) !void {
     // Collect and sort keys
-    var keys: std.ArrayListUnmanaged([]const u8) = .{};
+    var keys: std.ArrayListUnmanaged([]const u8) = .empty;
     defer keys.deinit(store.allocator);
 
     var it = store.iterator();
@@ -528,7 +332,7 @@ pub fn writeMultiJsonOutput(
     unmask_keys: []const []const u8,
 ) !void {
     // Collect and sort keys
-    var keys: std.ArrayListUnmanaged([]const u8) = .{};
+    var keys: std.ArrayListUnmanaged([]const u8) = .empty;
     defer keys.deinit(store.allocator);
 
     var it = store.iterator();
@@ -632,7 +436,7 @@ pub fn writeMultiJsonSingleKey(
 
 /// Write list of keys (multi-file store)
 pub fn writeMultiListOutput(writer: anytype, store: *const env_parser.MultiEnvStore) !void {
-    var keys: std.ArrayListUnmanaged([]const u8) = .{};
+    var keys: std.ArrayListUnmanaged([]const u8) = .empty;
     defer keys.deinit(store.allocator);
 
     var it = store.iterator();
@@ -651,63 +455,57 @@ pub fn writeMultiListOutput(writer: anytype, store: *const env_parser.MultiEnvSt
     }
 }
 
-// =============================================================================
-// File-based wrappers for multi-file output
-// Uses dynamic ArrayListUnmanaged buffer to support arbitrary output sizes
-// =============================================================================
-
-pub fn writeMultiToonOutputToFile(
-    file: std.fs.File,
-    store: *const env_parser.MultiEnvStore,
-    unmask_keys: []const []const u8,
-) !void {
-    var buffer: std.ArrayListUnmanaged(u8) = .{};
-    defer buffer.deinit(store.allocator);
-    try writeMultiToonOutput(buffer.writer(store.allocator), store, unmask_keys);
-    try file.writeAll(buffer.items);
+/// Write a JSON-escaped string body (no surrounding quotes). Public so the CLI
+/// layer can emit consistent JSON for success/error envelopes.
+pub fn writeJsonEscaped(writer: anytype, value: []const u8) !void {
+    for (value) |c| {
+        switch (c) {
+            '"' => try writer.writeAll("\\\""),
+            '\\' => try writer.writeAll("\\\\"),
+            '\n' => try writer.writeAll("\\n"),
+            '\r' => try writer.writeAll("\\r"),
+            '\t' => try writer.writeAll("\\t"),
+            else => {
+                if (c < 0x20) {
+                    // Control characters must be \u-escaped for valid JSON
+                    try writer.print("\\u{x:0>4}", .{c});
+                } else {
+                    try writer.writeByte(c);
+                }
+            },
+        }
+    }
 }
 
-pub fn writeMultiToonSingleKeyToFile(
-    file: std.fs.File,
-    entry: env_parser.MultiEnvEntry,
-    unmask: bool,
-) !void {
-    // Single key output is bounded, use fixed buffer
-    var buf: [4096]u8 = undefined;
-    var fbs = std.io.fixedBufferStream(&buf);
-    try writeMultiToonSingleKey(fbs.writer(), entry, unmask);
-    try file.writeAll(fbs.getWritten());
+/// Write list of keys as a stable JSON object: {"keys":["A","B"]}
+pub fn writeMultiListJson(writer: anytype, store: *const env_parser.MultiEnvStore) !void {
+    var keys: std.ArrayListUnmanaged([]const u8) = .empty;
+    defer keys.deinit(store.allocator);
+
+    var it = store.iterator();
+    while (it.next()) |entry| {
+        try keys.append(store.allocator, entry.value_ptr.key);
+    }
+
+    std.mem.sort([]const u8, keys.items, {}, struct {
+        fn lessThan(_: void, a: []const u8, b: []const u8) bool {
+            return std.mem.lessThan(u8, a, b);
+        }
+    }.lessThan);
+
+    try writer.writeAll("{\"keys\":[");
+    for (keys.items, 0..) |key, i| {
+        if (i > 0) try writer.writeAll(",");
+        try writer.writeByte('"');
+        try writeJsonEscaped(writer, key);
+        try writer.writeByte('"');
+    }
+    try writer.writeAll("]}\n");
 }
 
-pub fn writeMultiJsonOutputToFile(
-    file: std.fs.File,
-    store: *const env_parser.MultiEnvStore,
-    unmask_keys: []const []const u8,
-) !void {
-    var buffer: std.ArrayListUnmanaged(u8) = .{};
-    defer buffer.deinit(store.allocator);
-    try writeMultiJsonOutput(buffer.writer(store.allocator), store, unmask_keys);
-    try file.writeAll(buffer.items);
-}
-
-pub fn writeMultiJsonSingleKeyToFile(
-    file: std.fs.File,
-    entry: env_parser.MultiEnvEntry,
-    unmask: bool,
-) !void {
-    // Single key output is bounded, use fixed buffer
-    var buf: [4096]u8 = undefined;
-    var fbs = std.io.fixedBufferStream(&buf);
-    try writeMultiJsonSingleKey(fbs.writer(), entry, unmask);
-    try file.writeAll(fbs.getWritten());
-}
-
-pub fn writeMultiListOutputToFile(file: std.fs.File, store: *const env_parser.MultiEnvStore) !void {
-    var buffer: std.ArrayListUnmanaged(u8) = .{};
-    defer buffer.deinit(store.allocator);
-    try writeMultiListOutput(buffer.writer(store.allocator), store);
-    try file.writeAll(buffer.items);
-}
+// Note: under the Zig 0.16 I/O model the CLI streams directly to a
+// `std.Io.Writer` over stdout (see cli.zig), so the previous `*ToFile`
+// buffering wrappers are no longer needed.
 
 // =============================================================================
 // Tests
@@ -747,12 +545,12 @@ test "multi toon output format" {
     try store.put("API_KEY", "prod_secret", ".env.production");
 
     var buf: [2048]u8 = undefined;
-    var fbs = std.io.fixedBufferStream(&buf);
+    var w = std.Io.Writer.fixed(&buf);
 
     const unmask_keys = [_][]const u8{};
-    try writeMultiToonOutput(fbs.writer(), &store, &unmask_keys);
+    try writeMultiToonOutput(&w, &store, &unmask_keys);
 
-    const output_str = fbs.getWritten();
+    const output_str = w.buffered();
     try std.testing.expect(std.mem.indexOf(u8, output_str, "API_KEY:") != null);
     try std.testing.expect(std.mem.indexOf(u8, output_str, "  .env: ") != null);
     try std.testing.expect(std.mem.indexOf(u8, output_str, "  .env.production: ") != null);
@@ -768,12 +566,12 @@ test "structured output format" {
     try store.put("API_KEY", "sk_live_secret123", ".env");
 
     var buf: [1024]u8 = undefined;
-    var fbs = std.io.fixedBufferStream(&buf);
+    var w = std.Io.Writer.fixed(&buf);
 
     const unmask_keys = [_][]const u8{};
-    try writeStructuredOutput(fbs.writer(), &store, &unmask_keys);
+    try writeStructuredOutput(&w, &store, &unmask_keys);
 
-    const output_str = fbs.getWritten();
+    const output_str = w.buffered();
     try std.testing.expect(std.mem.indexOf(u8, output_str, "envs[2]{key,value,status}:") != null);
     // All values masked by default
     try std.testing.expect(std.mem.indexOf(u8, output_str, "API_URL,****.com,masked") != null);
@@ -788,12 +586,12 @@ test "json output format" {
     try store.put("PORT", "3000", ".env");
 
     var buf: [1024]u8 = undefined;
-    var fbs = std.io.fixedBufferStream(&buf);
+    var w = std.Io.Writer.fixed(&buf);
 
     const unmask_keys = [_][]const u8{};
-    try writeJsonOutput(fbs.writer(), &store, &unmask_keys);
+    try writeJsonOutput(&w, &store, &unmask_keys);
 
-    const output_str = fbs.getWritten();
+    const output_str = w.buffered();
     try std.testing.expect(std.mem.indexOf(u8, output_str, "\"envs\":") != null);
     try std.testing.expect(std.mem.indexOf(u8, output_str, "\"key\": \"PORT\"") != null);
     // All values masked
@@ -809,11 +607,11 @@ test "list output" {
     try store.put("KEY_A", "value_a", ".env");
 
     var buf: [256]u8 = undefined;
-    var fbs = std.io.fixedBufferStream(&buf);
+    var w = std.Io.Writer.fixed(&buf);
 
-    try writeListOutput(fbs.writer(), &store);
+    try writeListOutput(&w, &store);
 
-    const output_str = fbs.getWritten();
+    const output_str = w.buffered();
     // Keys should be sorted
     try std.testing.expectEqualStrings("KEY_A\nKEY_B\n", output_str);
 }
@@ -826,12 +624,12 @@ test "unmask override" {
     try store.put("API_KEY", "sk_live_secret123", ".env");
 
     var buf: [1024]u8 = undefined;
-    var fbs = std.io.fixedBufferStream(&buf);
+    var w = std.Io.Writer.fixed(&buf);
 
     const unmask_keys = [_][]const u8{"API_KEY"};
-    try writeStructuredOutput(fbs.writer(), &store, &unmask_keys);
+    try writeStructuredOutput(&w, &store, &unmask_keys);
 
-    const output_str = fbs.getWritten();
+    const output_str = w.buffered();
     // Value should be unmasked
     try std.testing.expect(std.mem.indexOf(u8, output_str, "API_KEY,sk_live_secret123,public") != null);
 }
@@ -845,11 +643,11 @@ test "multi json output produces valid json structure" {
     try store.put("API_KEY", "prod_secret_456", ".env.production");
 
     var buf: [4096]u8 = undefined;
-    var fbs = std.io.fixedBufferStream(&buf);
+    var w = std.Io.Writer.fixed(&buf);
     const no_unmask = [_][]const u8{};
-    try writeMultiJsonOutput(fbs.writer(), &store, &no_unmask);
+    try writeMultiJsonOutput(&w, &store, &no_unmask);
 
-    const result = fbs.getWritten();
+    const result = w.buffered();
 
     // Should NOT contain malformed pattern "value": "v":
     try std.testing.expect(std.mem.indexOf(u8, result, "\"value\": \"v\":") == null);
@@ -867,11 +665,11 @@ test "multi json output escapes special characters" {
     try store.put("SPECIAL", "line1\nline2\ttab\"quote\\backslash", ".env");
 
     var buf: [4096]u8 = undefined;
-    var fbs = std.io.fixedBufferStream(&buf);
+    var w = std.Io.Writer.fixed(&buf);
     const unmask_keys = [_][]const u8{"SPECIAL"};
-    try writeMultiJsonOutput(fbs.writer(), &store, &unmask_keys);
+    try writeMultiJsonOutput(&w, &store, &unmask_keys);
 
-    const result = fbs.getWritten();
+    const result = w.buffered();
     try std.testing.expect(std.mem.indexOf(u8, result, "\\n") != null);
     try std.testing.expect(std.mem.indexOf(u8, result, "\\t") != null);
     try std.testing.expect(std.mem.indexOf(u8, result, "\\\"") != null);
@@ -889,10 +687,10 @@ test "multi json single key produces valid json array" {
     const entry = store.get("DB_URL").?;
 
     var buf: [2048]u8 = undefined;
-    var fbs = std.io.fixedBufferStream(&buf);
-    try writeMultiJsonSingleKey(fbs.writer(), entry, true);
+    var w = std.Io.Writer.fixed(&buf);
+    try writeMultiJsonSingleKey(&w, entry, true);
 
-    const result = fbs.getWritten();
+    const result = w.buffered();
     try std.testing.expect(std.mem.startsWith(u8, result, "["));
     try std.testing.expect(std.mem.indexOf(u8, result, "\"file\": \".env\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, result, "\"value\": \"postgres://") != null);
@@ -915,11 +713,11 @@ test "multi output handles large number of env vars" {
     }
 
     var buf: [65536]u8 = undefined;
-    var fbs = std.io.fixedBufferStream(&buf);
+    var w = std.Io.Writer.fixed(&buf);
     const no_unmask = [_][]const u8{};
-    try writeMultiToonOutput(fbs.writer(), &store, &no_unmask);
+    try writeMultiToonOutput(&w, &store, &no_unmask);
 
-    const result = fbs.getWritten();
+    const result = w.buffered();
     try std.testing.expect(std.mem.indexOf(u8, result, "VARIABLE_WITH_LONG_NAME_0:") != null);
     try std.testing.expect(std.mem.indexOf(u8, result, "VARIABLE_WITH_LONG_NAME_99:") != null);
 }

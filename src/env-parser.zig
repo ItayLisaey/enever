@@ -39,7 +39,7 @@ pub const MultiEnvStore = struct {
     pub fn init(allocator: std.mem.Allocator) MultiEnvStore {
         return .{
             .entries = std.StringHashMap(MultiEnvEntry).init(allocator),
-            .files = .{},
+            .files = .empty,
             .allocator = allocator,
         };
     }
@@ -82,7 +82,7 @@ pub const MultiEnvStore = struct {
             const owned_key = try self.allocator.dupe(u8, key);
             errdefer self.allocator.free(owned_key);
 
-            var values: std.ArrayListUnmanaged(FileValue) = .{};
+            var values: std.ArrayListUnmanaged(FileValue) = .empty;
             try values.append(self.allocator, file_value);
 
             try self.entries.put(owned_key, .{
@@ -209,38 +209,40 @@ pub const ParseError = error{
     AntivirusInterference,
 };
 
-pub fn parseEnvFile(allocator: std.mem.Allocator, path: []const u8, store: *EnvStore) ParseError!void {
-    // Check if path is absolute (handles both Unix and Windows paths)
+const max_env_file_bytes = 1024 * 1024;
+
+/// Read an entire env file (absolute or cwd-relative) into a freshly allocated
+/// buffer. Caller owns the result. Zig 0.16 routes all file I/O through `io`.
+fn readFileBytes(io: std.Io, allocator: std.mem.Allocator, path: []const u8) ParseError![]u8 {
     const is_absolute = std.fs.path.isAbsolute(path);
-
     const file = if (is_absolute)
-        std.fs.openFileAbsolute(path, .{}) catch |err| {
-            return switch (err) {
-                error.FileNotFound => error.FileNotFound,
-                error.AccessDenied => error.AccessDenied,
-                error.IsDir => error.IsDir,
-                else => error.Unexpected,
-            };
-        }
+        std.Io.Dir.openFileAbsolute(io, path, .{}) catch |err| return mapOpenError(err)
     else
-        std.fs.cwd().openFile(path, .{}) catch |err| {
-            return switch (err) {
-                error.FileNotFound => error.FileNotFound,
-                error.AccessDenied => error.AccessDenied,
-                error.IsDir => error.IsDir,
-                else => error.Unexpected,
-            };
-        };
-    defer file.close();
+        std.Io.Dir.cwd().openFile(io, path, .{}) catch |err| return mapOpenError(err);
+    defer file.close(io);
 
-    const content = file.readToEndAlloc(allocator, 1024 * 1024) catch |err| {
+    var read_buf: [4096]u8 = undefined;
+    var file_reader = file.reader(io, &read_buf);
+    return file_reader.interface.allocRemaining(allocator, .limited(max_env_file_bytes)) catch |err| {
         return switch (err) {
             error.OutOfMemory => error.OutOfMemory,
             else => error.Unexpected,
         };
     };
-    defer allocator.free(content);
+}
 
+fn mapOpenError(err: anyerror) ParseError {
+    return switch (err) {
+        error.FileNotFound => error.FileNotFound,
+        error.AccessDenied => error.AccessDenied,
+        error.IsDir => error.IsDir,
+        else => error.Unexpected,
+    };
+}
+
+pub fn parseEnvFile(io: std.Io, allocator: std.mem.Allocator, path: []const u8, store: *EnvStore) ParseError!void {
+    const content = try readFileBytes(io, allocator, path);
+    defer allocator.free(content);
     try parseEnvContent(allocator, content, path, store);
 }
 
@@ -325,7 +327,7 @@ pub fn parseEnvContent(allocator: std.mem.Allocator, content: []const u8, source
             while (i < content.len and content[i] != '\n') {
                 i += 1;
             }
-            value = std.mem.trimRight(u8, content[value_start..i], " \t\r");
+            value = std.mem.trimEnd(u8, content[value_start..i], " \t\r");
         }
 
         // Store the value (need to process escape sequences for quoted values)
@@ -432,23 +434,23 @@ fn isBaseEnvFile(name: []const u8) bool {
 }
 
 /// Discover all .env* and +.env* files in the current directory
-pub fn discoverEnvFiles(allocator: std.mem.Allocator) !std.ArrayListUnmanaged([]const u8) {
-    var files: std.ArrayListUnmanaged([]const u8) = .{};
+pub fn discoverEnvFiles(io: std.Io, allocator: std.mem.Allocator) !std.ArrayListUnmanaged([]const u8) {
+    var files: std.ArrayListUnmanaged([]const u8) = .empty;
     errdefer {
         for (files.items) |f| allocator.free(f);
         files.deinit(allocator);
     }
 
-    var dir = std.fs.cwd().openDir(".", .{ .iterate = true }) catch |err| {
+    var dir = std.Io.Dir.cwd().openDir(io, ".", .{ .iterate = true }) catch |err| {
         return switch (err) {
             error.AccessDenied => error.AccessDenied,
             else => error.Unexpected,
         };
     };
-    defer dir.close();
+    defer dir.close(io);
 
     var iter = dir.iterate();
-    while (iter.next() catch null) |entry| {
+    while (iter.next(io) catch null) |entry| {
         if (entry.kind != .file) continue;
 
         if (isEnvFile(entry.name)) {
@@ -472,11 +474,11 @@ pub fn discoverEnvFiles(allocator: std.mem.Allocator) !std.ArrayListUnmanaged([]
 }
 
 /// Load all .env* files into a MultiEnvStore (no merging - keeps all values)
-pub fn loadAllEnvFiles(allocator: std.mem.Allocator) !MultiEnvStore {
+pub fn loadAllEnvFiles(io: std.Io, allocator: std.mem.Allocator) !MultiEnvStore {
     var store = MultiEnvStore.init(allocator);
     errdefer store.deinit();
 
-    var files = try discoverEnvFiles(allocator);
+    var files = try discoverEnvFiles(io, allocator);
     defer {
         for (files.items) |f| allocator.free(f);
         files.deinit(allocator);
@@ -484,7 +486,7 @@ pub fn loadAllEnvFiles(allocator: std.mem.Allocator) !MultiEnvStore {
 
     for (files.items) |filename| {
         try store.addFile(filename);
-        parseEnvFileMulti(allocator, filename, &store) catch |err| {
+        parseEnvFileMulti(io, allocator, filename, &store) catch |err| {
             if (err != error.FileNotFound) return err;
         };
     }
@@ -493,7 +495,7 @@ pub fn loadAllEnvFiles(allocator: std.mem.Allocator) !MultiEnvStore {
 }
 
 /// Load env files from a specific path (file or directory)
-pub fn loadEnvFilesFromPath(allocator: std.mem.Allocator, path: []const u8) !MultiEnvStore {
+pub fn loadEnvFilesFromPath(io: std.Io, allocator: std.mem.Allocator, path: []const u8) !MultiEnvStore {
     var store = MultiEnvStore.init(allocator);
     errdefer store.deinit();
 
@@ -503,27 +505,27 @@ pub fn loadEnvFilesFromPath(allocator: std.mem.Allocator, path: []const u8) !Mul
     // Determine if path is a file or directory by trying to open as directory first
     const is_directory = blk: {
         if (is_absolute) {
-            if (std.fs.openDirAbsolute(path, .{})) |d| {
+            if (std.Io.Dir.openDirAbsolute(io, path, .{})) |d| {
                 var dir = d;
-                dir.close();
+                dir.close(io);
                 break :blk true;
             } else |_| {}
         } else {
-            if (std.fs.cwd().openDir(path, .{})) |d| {
+            if (std.Io.Dir.cwd().openDir(io, path, .{})) |d| {
                 var dir = d;
-                dir.close();
+                dir.close(io);
                 break :blk true;
             } else |_| {}
         }
         // Not a directory - check if it's a file
         if (is_absolute) {
-            if (std.fs.openFileAbsolute(path, .{})) |f| {
-                f.close();
+            if (std.Io.Dir.openFileAbsolute(io, path, .{})) |f| {
+                f.close(io);
                 break :blk false;
             } else |_| {}
         } else {
-            if (std.fs.cwd().openFile(path, .{})) |f| {
-                f.close();
+            if (std.Io.Dir.cwd().openFile(io, path, .{})) |f| {
+                f.close(io);
                 break :blk false;
             } else |_| {}
         }
@@ -534,29 +536,29 @@ pub fn loadEnvFilesFromPath(allocator: std.mem.Allocator, path: []const u8) !Mul
     if (is_directory) {
         // It's a directory - discover .env* files in it
         var dir = if (is_absolute)
-            std.fs.openDirAbsolute(path, .{ .iterate = true }) catch |err| {
+            std.Io.Dir.openDirAbsolute(io, path, .{ .iterate = true }) catch |err| {
                 return switch (err) {
                     error.AccessDenied => error.AccessDenied,
                     else => error.Unexpected,
                 };
             }
         else
-            std.fs.cwd().openDir(path, .{ .iterate = true }) catch |err| {
+            std.Io.Dir.cwd().openDir(io, path, .{ .iterate = true }) catch |err| {
                 return switch (err) {
                     error.AccessDenied => error.AccessDenied,
                     else => error.Unexpected,
                 };
             };
-        defer dir.close();
+        defer dir.close(io);
 
-        var files: std.ArrayListUnmanaged([]const u8) = .{};
+        var files: std.ArrayListUnmanaged([]const u8) = .empty;
         defer {
             for (files.items) |f| allocator.free(f);
             files.deinit(allocator);
         }
 
         var iter = dir.iterate();
-        while (iter.next() catch null) |entry| {
+        while (iter.next(io) catch null) |entry| {
             if (entry.kind != .file) continue;
             if (isEnvFile(entry.name)) {
                 const owned = try allocator.dupe(u8, entry.name);
@@ -579,7 +581,7 @@ pub fn loadEnvFilesFromPath(allocator: std.mem.Allocator, path: []const u8) !Mul
             // Build full path using platform-appropriate separator
             const full_path = std.fs.path.join(allocator, &.{ path, filename }) catch continue;
             defer allocator.free(full_path);
-            parseEnvFileAtPath(allocator, full_path, filename, &store) catch |err| {
+            parseEnvFileAtPath(io, allocator, full_path, filename, &store) catch |err| {
                 if (err != error.FileNotFound) return err;
             };
         }
@@ -587,7 +589,7 @@ pub fn loadEnvFilesFromPath(allocator: std.mem.Allocator, path: []const u8) !Mul
         // It's a file - parse it directly
         const basename = std.fs.path.basename(path);
         try store.addFile(basename);
-        parseEnvFileAtPath(allocator, path, basename, &store) catch |err| {
+        parseEnvFileAtPath(io, allocator, path, basename, &store) catch |err| {
             if (err != error.FileNotFound) return err;
         };
     }
@@ -596,74 +598,16 @@ pub fn loadEnvFilesFromPath(allocator: std.mem.Allocator, path: []const u8) !Mul
 }
 
 /// Parse env file at an absolute/relative path into MultiEnvStore
-fn parseEnvFileAtPath(allocator: std.mem.Allocator, path: []const u8, display_name: []const u8, store: *MultiEnvStore) ParseError!void {
-    // Check if path is absolute (handles both Unix and Windows paths)
-    const is_absolute = std.fs.path.isAbsolute(path);
-
-    const file = if (is_absolute)
-        std.fs.openFileAbsolute(path, .{}) catch |err| {
-            return switch (err) {
-                error.FileNotFound => error.FileNotFound,
-                error.AccessDenied => error.AccessDenied,
-                error.IsDir => error.IsDir,
-                else => error.Unexpected,
-            };
-        }
-    else
-        std.fs.cwd().openFile(path, .{}) catch |err| {
-            return switch (err) {
-                error.FileNotFound => error.FileNotFound,
-                error.AccessDenied => error.AccessDenied,
-                error.IsDir => error.IsDir,
-                else => error.Unexpected,
-            };
-        };
-    defer file.close();
-
-    const content = file.readToEndAlloc(allocator, 1024 * 1024) catch |err| {
-        return switch (err) {
-            error.OutOfMemory => error.OutOfMemory,
-            else => error.Unexpected,
-        };
-    };
+fn parseEnvFileAtPath(io: std.Io, allocator: std.mem.Allocator, path: []const u8, display_name: []const u8, store: *MultiEnvStore) ParseError!void {
+    const content = try readFileBytes(io, allocator, path);
     defer allocator.free(content);
-
     try parseEnvContentMulti(content, display_name, store);
 }
 
 /// Parse env file into MultiEnvStore
-pub fn parseEnvFileMulti(allocator: std.mem.Allocator, path: []const u8, store: *MultiEnvStore) ParseError!void {
-    // Check if path is absolute (handles both Unix and Windows paths)
-    const is_absolute = std.fs.path.isAbsolute(path);
-
-    const file = if (is_absolute)
-        std.fs.openFileAbsolute(path, .{}) catch |err| {
-            return switch (err) {
-                error.FileNotFound => error.FileNotFound,
-                error.AccessDenied => error.AccessDenied,
-                error.IsDir => error.IsDir,
-                else => error.Unexpected,
-            };
-        }
-    else
-        std.fs.cwd().openFile(path, .{}) catch |err| {
-            return switch (err) {
-                error.FileNotFound => error.FileNotFound,
-                error.AccessDenied => error.AccessDenied,
-                error.IsDir => error.IsDir,
-                else => error.Unexpected,
-            };
-        };
-    defer file.close();
-
-    const content = file.readToEndAlloc(allocator, 1024 * 1024) catch |err| {
-        return switch (err) {
-            error.OutOfMemory => error.OutOfMemory,
-            else => error.Unexpected,
-        };
-    };
+pub fn parseEnvFileMulti(io: std.Io, allocator: std.mem.Allocator, path: []const u8, store: *MultiEnvStore) ParseError!void {
+    const content = try readFileBytes(io, allocator, path);
     defer allocator.free(content);
-
     try parseEnvContentMulti(content, path, store);
 }
 
@@ -749,7 +693,7 @@ pub fn parseEnvContentMulti(content: []const u8, source_file: []const u8, store:
             while (i < content.len and content[i] != '\n') {
                 i += 1;
             }
-            value = std.mem.trimRight(u8, content[value_start..i], " \t\r");
+            value = std.mem.trimEnd(u8, content[value_start..i], " \t\r");
         }
 
         // Store the value (need to process escape sequences for quoted values)
@@ -761,7 +705,7 @@ pub fn parseEnvContentMulti(content: []const u8, source_file: []const u8, store:
 }
 
 // Legacy function kept for compatibility
-pub fn loadEnvFiles(allocator: std.mem.Allocator, mode: []const u8) !EnvStore {
+pub fn loadEnvFiles(io: std.Io, allocator: std.mem.Allocator, mode: []const u8) !EnvStore {
     var store = EnvStore.init(allocator);
     errdefer store.deinit();
 
@@ -771,19 +715,19 @@ pub fn loadEnvFiles(allocator: std.mem.Allocator, mode: []const u8) !EnvStore {
     // 3. .env.local (highest priority)
 
     // Load .env (base)
-    parseEnvFile(allocator, ".env", &store) catch |err| {
+    parseEnvFile(io, allocator, ".env", &store) catch |err| {
         if (err != error.FileNotFound) return err;
     };
 
     // Load .env.[MODE]
     var mode_file_buf: [256]u8 = undefined;
     const mode_file = std.fmt.bufPrint(&mode_file_buf, ".env.{s}", .{mode}) catch return error.InvalidFormat;
-    parseEnvFile(allocator, mode_file, &store) catch |err| {
+    parseEnvFile(io, allocator, mode_file, &store) catch |err| {
         if (err != error.FileNotFound) return err;
     };
 
     // Load .env.local (highest priority)
-    parseEnvFile(allocator, ".env.local", &store) catch |err| {
+    parseEnvFile(io, allocator, ".env.local", &store) catch |err| {
         if (err != error.FileNotFound) return err;
     };
 
